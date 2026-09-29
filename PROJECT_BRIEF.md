@@ -402,6 +402,8 @@ lark-cli base +workflow-enable --base-token "<base_token>" --workflow-id "<workf
 - 记录 upsert 写回接口。
 - 模板表自动创建接口。
 - webhook 接口。
+- GitHub Content Hub → 微信草稿的 Publisher API（`POST /api/publisher/drafts`），含 Bearer 鉴权、`article_id + source_commit` 幂等持久化（独立 `PublisherStateStore` 边界）、GitHub 内容拉取（`GithubContentService`）、内容校验与稳定 Error Contract。
+- GitHub/微信依赖边界的 vitest 测试（`src/routes/publisher.routes.test.ts`）。
 - GitHub README、环境变量说明、部署说明初版。
 
 未完成：
@@ -409,6 +411,21 @@ lark-cli base +workflow-enable --base-token "<base_token>" --workflow-id "<workf
 - workflow 自动创建。
 - 微信 API 接入。
 - 配置持久化。
+
+## 11. Publisher API 增量说明
+
+新增模块（不影响飞书链路）：
+
+- `src/services/githubContent.service.ts`：GitHub Content Hub Adapter，按 `articles/{year}/{article_id}/` 读取 `meta.json / content.html / assets.json / cover`，使用服务器端 `GITHUB_CONTENT_TOKEN`（Fine-grained PAT，Contents Read-only），拉取时以 `source_commit` 精确锁定版本。
+- `src/services/publisherStorage.service.ts`：幂等状态存储，独立 `PublisherStateStore` 接口 + 本地 JSON 文件实现（原子写），后续可替换为 SQLite / 数据库。
+- `src/services/publisher.service.ts`：Publisher 编排（校验 → 幂等 → 拉取 → 上传素材 → 建草稿 → 持久化），复用现有 `WechatService`。
+- `src/middleware/publisherAuth.ts` + `src/routes/publisher.routes.ts`：`POST /api/publisher/drafts`，Bearer `PUBLISHER_WEBHOOK_TOKEN` 鉴权。
+
+关键约定：
+
+- 微信凭证走服务器端 `WECHAT_APP_ID / WECHAT_APP_SECRET`，不依赖 `baseToken / tableId`。
+- 不允许自动正式发布/群发；上传草稿 ≠ 发布，正式发布由 Lyra 人工完成。
+- 日志与返回体绝不包含任何 Secret；失败错误带 `code / message / retryable`。
 
 ## 10. 给其他 AI 的注意事项
 

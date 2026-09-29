@@ -175,7 +175,66 @@ POST /api/templates/wechat-draft/setup
 POST /api/templates/wechat-draft/workflows
 POST /api/templates/push-draft-table
 POST /api/webhooks/feishu/base-record-sync
+POST /api/publisher/drafts
 ```
+
+## Publisher API（GitHub Content Hub → 微信草稿）
+
+新增的 GitHub 链路入口，与飞书链路并存：
+
+```text
+GitHub Content Hub（yaai-content-hub）
+  -> GitHub Actions
+  -> POST /api/publisher/drafts
+  -> Publisher 自行拉取 meta.json / content.html / assets.json / cover
+  -> 微信永久图片素材上传 + 创建公众号图文草稿
+  -> 幂等状态持久化（article_id + source_commit）
+```
+
+请求体（调用方不得把完整 HTML 放进请求）：
+
+```json
+{
+  "repository": "LyraWang6688/yaai-content-hub",
+  "article_id": "2026-09-29-ai-tools",
+  "ref": "main",
+  "source_commit": "<git commit sha>"
+}
+```
+
+成功响应：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "article_id": "2026-09-29-ai-tools",
+    "status": "uploaded_to_wechat",
+    "source_commit": "...",
+    "wechat_draft_media_id": "...",
+    "uploaded_at": "...",
+    "idempotent_replay": false
+  }
+}
+```
+
+- **认证**：`Authorization: Bearer <PUBLISHER_WEBHOOK_TOKEN>`，未认证返回稳定 `401`。
+- **幂等**：键为 `article_id + source_commit`。重复调用返回上一次成功结果（`idempotent_replay = true`），不重复创建草稿；不可重试失败（如 `status != ready_to_upload`）会快速返回，可重试失败（网络/上游）会重新尝试。
+- **校验**：`meta.schema_version = 1`、`meta.article_id` 与请求一致、`meta.status = ready_to_upload`、`title`、`content.html`、`cover` 必须存在，否则返回稳定 Error Contract（含 `code` / `message` / `retryable`）。
+- **Secret 归属**：`WECHAT_APP_ID / WECHAT_APP_SECRET / GITHUB_CONTENT_TOKEN` 只存在于 Publisher 服务器端；GitHub Actions 只持有 `PUBLISHER_ENDPOINT + PUBLISHER_WEBHOOK_TOKEN`。
+
+新增环境变量（详见 `.env.example`）：
+
+```text
+GITHUB_CONTENT_TOKEN=      # Fine-grained PAT，仅 Content Repo，Contents Read-only
+WECHAT_APP_ID=             # 单公众号 MVP，服务器端微信凭证
+WECHAT_APP_SECRET=
+PUBLISHER_WEBHOOK_TOKEN=   # Publisher API 鉴权
+PUBLISHER_STATE_FILE=      # 幂等状态文件（默认 .data/publisher-state.json）
+GITHUB_API_TIMEOUT_MS=30000
+```
+
+幂等状态默认写入 `.data/publisher-state.json`（已 gitignore），通过独立 `PublisherStateStore` 边界隔离，后续可替换为 SQLite / 数据库。
 
 一键创建模板 Base 和推送草稿表请求示例：
 
