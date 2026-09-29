@@ -67,11 +67,12 @@ export class FilePublisherStateStore implements PublisherStateStore {
       if (!Array.isArray(parsed)) {
         throw new Error("publisher state file must contain an array");
       }
+      // 不允许 partial recovery：数组中任何一条记录语义无效，整个加载失败（fail-closed），
+      // 绝不静默跳过损坏记录——否则可能把「已上传 / 正在 processing」的版本当成不存在，导致重复调用微信。
       const loaded = new Map<string, PublisherUploadState>();
       parsed.forEach((item) => {
-        if (isValidState(item)) {
-          loaded.set(stateKey(item.article_id, item.source_commit), item);
-        }
+        const state = validateStateRecord(item);
+        loaded.set(stateKey(state.article_id, state.source_commit), state);
       });
       this.states = loaded;
     } catch (error) {
@@ -113,12 +114,38 @@ function stateKey(articleId: string, sourceCommit: string) {
   return `${articleId}::${sourceCommit}`;
 }
 
-function isValidState(value: unknown): value is PublisherUploadState {
+/**
+ * 严格校验单条幂等记录（ledger integrity）：
+ * 任何一条记录语义无效，整个状态文件加载失败（不允许 partial recovery）。
+ */
+function validateStateRecord(value: unknown): PublisherUploadState {
   if (typeof value !== "object" || value === null) {
-    return false;
+    throw new Error("publisher state record must be an object");
   }
-  const candidate = value as Partial<PublisherUploadState>;
-  return typeof candidate.article_id === "string" && typeof candidate.source_commit === "string";
+  const record = value as Record<string, unknown>;
+  if (typeof record.article_id !== "string" || !record.article_id.trim()) {
+    throw new Error("publisher state record: article_id must be a non-empty string");
+  }
+  if (typeof record.source_commit !== "string" || !record.source_commit.trim()) {
+    throw new Error("publisher state record: source_commit must be a non-empty string");
+  }
+  if (
+    record.status !== "processing" &&
+    record.status !== "uploaded_to_wechat" &&
+    record.status !== "failed"
+  ) {
+    throw new Error(`publisher state record: invalid status "${String(record.status)}"`);
+  }
+  if (typeof record.uploaded_at !== "string" || !record.uploaded_at.trim()) {
+    throw new Error("publisher state record: uploaded_at must be a non-empty string");
+  }
+  if (
+    record.status === "uploaded_to_wechat" &&
+    (typeof record.wechat_draft_media_id !== "string" || !record.wechat_draft_media_id.trim())
+  ) {
+    throw new Error("publisher state record: status=uploaded_to_wechat requires a non-empty wechat_draft_media_id");
+  }
+  return record as PublisherUploadState;
 }
 
 function isNotFoundError(error: unknown) {

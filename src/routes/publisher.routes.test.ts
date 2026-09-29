@@ -577,4 +577,69 @@ describe("POST /api/publisher/drafts", () => {
     const draftCalls = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add"));
     expect(draftCalls).toHaveLength(1);
   });
+
+  it("18. 状态记录 status 非法：首次与再次访问均失败，GitHub/微信调用为 0", async () => {
+    await bootApp(buildFiles());
+    // 合法 JSON 但 status 不在允许集合内
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: SOURCE_COMMIT,
+            status: "weird_status",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(first.status).toBe(500);
+    const firstBody = (await first.json()) as { error: { code: string } };
+    expect(firstBody.error.code).toBe("INTERNAL_ERROR");
+    expect(wechatCalls).toHaveLength(0);
+    expect(githubCalls).toHaveLength(0);
+
+    // 第二次仍然失败：loadPromise 保持 rejected，不因 partial recovery 退化为空状态
+    const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(second.status).toBe(500);
+    expect(wechatCalls).toHaveLength(0);
+    expect(githubCalls).toHaveLength(0);
+  });
+
+  it("19. uploaded_to_wechat 记录缺少 wechat_draft_media_id：State Store fail-closed，不重新调用微信", async () => {
+    await bootApp(buildFiles());
+    // status=uploaded_to_wechat 但缺 media_id：若被静默跳过，将把「已上传」版本当成不存在并重复调微信
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: SOURCE_COMMIT,
+            status: "uploaded_to_wechat",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    // 不允许重新调用微信 / GitHub
+    expect(wechatCalls).toHaveLength(0);
+    expect(githubCalls).toHaveLength(0);
+  });
 });
