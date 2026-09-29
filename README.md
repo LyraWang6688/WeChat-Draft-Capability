@@ -219,8 +219,9 @@ GitHub Content Hub（yaai-content-hub）
 ```
 
 - **认证**：`Authorization: Bearer <PUBLISHER_WEBHOOK_TOKEN>`，未认证返回稳定 `401`。
-- **幂等**：键为 `article_id + source_commit`。重复调用返回上一次成功结果（`idempotent_replay = true`），不重复创建草稿；不可重试失败（如 `status != ready_to_upload`）会快速返回，可重试失败（网络/上游）会重新尝试。
-- **校验**：`meta.schema_version = 1`、`meta.article_id` 与请求一致、`meta.status = ready_to_upload`、`title`、`content.html`、`cover` 必须存在，否则返回稳定 Error Contract（含 `code` / `message` / `retryable`）。
+- **幂等**：键为 `article_id + source_commit`。重复调用返回上一次成功结果（`idempotent_replay = true`），不重复创建草稿；不可重试失败（如 `status != ready_to_upload`）会快速返回，可重试失败（网络/上游）会重新尝试。**并发保护**：同一幂等键的并发请求在单进程内合并，同时只允许一个微信草稿创建流程执行，后续请求等待并复用首个执行结果（不再调用微信）。
+- **白名单**：只允许读取配置好的 Content Repository（`PUBLISHER_ALLOWED_REPOSITORIES`，MVP 默认 `LyraWang6688/yaai-content-hub`），其余仓库返回 `403 FORBIDDEN_REPOSITORY`，不信任 `request.repository`。
+- **校验**：`meta.schema_version = 1`、`meta.article_id` 与请求一致、`meta.status = ready_to_upload`、`title`、`content.html` 必须存在；`assets.schema_version = 1` 且 MVP 要求封面必需（`cover.required` 不可为 `false`、`cover.path` 指向的文件必须存在），否则返回稳定 Error Contract（含 `code` / `message` / `retryable`）。
 - **Secret 归属**：`WECHAT_APP_ID / WECHAT_APP_SECRET / GITHUB_CONTENT_TOKEN` 只存在于 Publisher 服务器端；GitHub Actions 只持有 `PUBLISHER_ENDPOINT + PUBLISHER_WEBHOOK_TOKEN`。
 
 新增环境变量（详见 `.env.example`）：
@@ -231,6 +232,7 @@ WECHAT_APP_ID=             # 单公众号 MVP，服务器端微信凭证
 WECHAT_APP_SECRET=
 PUBLISHER_WEBHOOK_TOKEN=   # Publisher API 鉴权
 PUBLISHER_STATE_FILE=      # 幂等状态文件（默认 .data/publisher-state.json）
+PUBLISHER_ALLOWED_REPOSITORIES=LyraWang6688/yaai-content-hub  # Content Repo 白名单（逗号分隔）
 GITHUB_API_TIMEOUT_MS=30000
 ```
 

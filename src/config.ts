@@ -24,5 +24,6 @@ export const appConfig = {
   wechatAppSecret: process.env.WECHAT_APP_SECRET || "",
   publisherWebhookToken: process.env.PUBLISHER_WEBHOOK_TOKEN || "",
   publisherStateFile: process.env.PUBLISHER_STATE_FILE || path.resolve(process.cwd(), ".data", "publisher-state.json"),
+  publisherAllowedRepositories: process.env.PUBLISHER_ALLOWED_REPOSITORIES || "LyraWang6688/yaai-content-hub",
   publicDir: path.resolve(__dirname, "..", "public")
 };

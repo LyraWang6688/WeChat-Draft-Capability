@@ -64,9 +64,12 @@ function defaultAssets() {
 type MockOptions = {
   githubNetworkError?: boolean;
   wechatDraftError?: boolean;
+  /** 模拟上游响应延迟（毫秒），用于构造并发窗口，保证第二个请求在第一个执行完成前进入 */
+  delayMs?: number;
 };
 
 function createMockFetch(files: Map<string, Buffer>, options: MockOptions = {}) {
+  const delay = () => (options.delayMs ? new Promise((resolve) => setTimeout(resolve, options.delayMs)) : Promise.resolve());
   return async (input: RequestInfo | URL, _init?: RequestInit) => {
     const href = String(input);
     if (href.includes("api.github.com")) {
@@ -74,6 +77,7 @@ function createMockFetch(files: Map<string, Buffer>, options: MockOptions = {}) 
       if (options.githubNetworkError) {
         throw new TypeError("fetch failed");
       }
+      await delay();
       const filePath = extractGithubPath(href);
       const file = files.get(filePath);
       if (!file) {
@@ -90,6 +94,7 @@ function createMockFetch(files: Map<string, Buffer>, options: MockOptions = {}) 
     }
     if (href.includes("api.weixin.qq.com")) {
       wechatCalls.push(href);
+      await delay();
       if (href.includes("/cgi-bin/token")) {
         return jsonResponse(200, { access_token: WECHAT_ACCESS_TOKEN, expires_in: 7200 });
       }
@@ -371,5 +376,73 @@ describe("POST /api/publisher/drafts", () => {
     secrets.forEach((secret) => {
       expect(allOutput).not.toContain(secret);
     });
+  });
+
+  it("10. 并发重复请求只创建一个微信草稿（Promise.all 双请求结果一致）", async () => {
+    // 给上游 mock 增加延迟，确保两个请求在第一个执行完成前都进入服务，命中 in-flight 合并
+    await bootApp(buildFiles(), { delayMs: 20 });
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      postDraft(`Bearer ${WEBHOOK_TOKEN}`),
+      postDraft(`Bearer ${WEBHOOK_TOKEN}`)
+    ]);
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+
+    const firstBody = (await firstResponse.json()) as {
+      data: { wechat_draft_media_id: string; idempotent_replay: boolean };
+    };
+    const secondBody = (await secondResponse.json()) as {
+      data: { wechat_draft_media_id: string; idempotent_replay: boolean };
+    };
+
+    // 两个请求得到一致的草稿结果
+    expect(firstBody.data.wechat_draft_media_id).toBe("draft_test_1");
+    expect(secondBody.data.wechat_draft_media_id).toBe(firstBody.data.wechat_draft_media_id);
+    // 一个请求执行上传（false），另一个等待并复用首个结果（true）
+    const replays = [firstBody.data.idempotent_replay, secondBody.data.idempotent_replay].sort();
+    expect(replays).toEqual([false, true]);
+
+    // 微信 draft/add 只调用一次
+    const draftCalls = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add"));
+    expect(draftCalls).toHaveLength(1);
+  });
+
+  it("11. 非白名单 Content Repository 返回 403 FORBIDDEN_REPOSITORY，且不触发上游调用", async () => {
+    await bootApp(buildFiles());
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`, {
+      ...requestBody(),
+      repository: "someone-else/unknown-repo"
+    });
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { code: string; retryable: boolean } };
+    expect(body.error.code).toBe("FORBIDDEN_REPOSITORY");
+    expect(body.error.retryable).toBe(false);
+    // 白名单校验在任何 GitHub / 微信调用之前
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
+  });
+
+  it("12. assets.schema_version 非 1 返回 ARTICLE_SCHEMA_INVALID 且不可重试", async () => {
+    const assets = { ...defaultAssets(), schema_version: 2 };
+    const files = buildFiles({ assets });
+    await bootApp(files);
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as { error: { code: string; retryable: boolean } };
+    expect(body.error.code).toBe("ARTICLE_SCHEMA_INVALID");
+    expect(body.error.retryable).toBe(false);
+  });
+
+  it("13. cover.required 为 false 违反 MVP 封面必需约束，返回 COVER_MISSING", async () => {
+    const assets = { ...defaultAssets(), cover: { path: "assets/cover.jpg", required: false } };
+    const files = buildFiles({ assets });
+    await bootApp(files);
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as { error: { code: string; retryable: boolean } };
+    expect(body.error.code).toBe("COVER_MISSING");
+    expect(body.error.retryable).toBe(false);
   });
 });

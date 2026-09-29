@@ -426,6 +426,9 @@ lark-cli base +workflow-enable --base-token "<base_token>" --workflow-id "<workf
 - 微信凭证走服务器端 `WECHAT_APP_ID / WECHAT_APP_SECRET`，不依赖 `baseToken / tableId`。
 - 不允许自动正式发布/群发；上传草稿 ≠ 发布，正式发布由 Lyra 人工完成。
 - 日志与返回体绝不包含任何 Secret；失败错误带 `code / message / retryable`。
+- 幂等：`article_id + source_commit`；同一键的并发请求在单进程内合并（in-flight 去重），只允许一个微信草稿创建流程执行，后续请求等待并复用首个结果（多副本部署需迁移共享存储 + 分布式锁）。
+- 白名单：仅允许读取 `PUBLISHER_ALLOWED_REPOSITORIES`（MVP 默认 `LyraWang6688/yaai-content-hub`），不信任 `request.repository`。
+- 内容校验：`meta.schema_version == 1`、`meta.status == ready_to_upload`、`assets.schema_version == 1`、封面必需（`cover.required` 不可为 `false`）。
 
 ## 10. 给其他 AI 的注意事项
 

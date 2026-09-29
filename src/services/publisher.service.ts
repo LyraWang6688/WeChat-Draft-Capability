@@ -49,8 +49,14 @@ const VALIDATION_STATUS_CODE = 422;
  * 状态持久化由独立 PublisherStateStore 边界负责，本服务只依赖接口，不关心存储实现。
  * 观察性日志只记录 traceId / article_id / source_commit / current_step / result / error_code，
  * 绝不记录 WECHAT_APP_SECRET、access_token、GITHUB_CONTENT_TOKEN、PUBLISHER_WEBHOOK_TOKEN。
+ *
+ * 并发保护：同一 article_id + source_commit 的并发请求会在进程内合并（in-flight 去重），
+ * 只允许一个微信草稿创建流程执行，后续并发请求等待并复用首个执行结果；
+ * 该保护覆盖当前单进程部署模型，多副本部署需迁移到共享存储 + 分布式锁。
  */
 export class PublisherDraftService {
+  private readonly inFlight = new Map<string, Promise<PublisherDraftResult>>();
+
   constructor(
     private readonly github: GithubContentService,
     private readonly wechat: WechatDraftClient,
@@ -59,6 +65,25 @@ export class PublisherDraftService {
 
   async createDraft(input: PublisherDraftRequest, traceId?: string): Promise<PublisherDraftResult> {
     validateRequest(input);
+    assertAllowedRepository(input.repository);
+
+    // 并发保护：同一幂等键已有执行中的流程时，等待并复用其结果（不再调用微信）
+    const key = idempotencyKey(input.article_id, input.source_commit);
+    const inFlightTask = this.inFlight.get(key);
+    if (inFlightTask) {
+      this.log(input, "idempotency", "wait_inflight", undefined, traceId, {});
+      const result = await inFlightTask;
+      return { ...result, idempotent_replay: true };
+    }
+
+    const task = this.executeCreateDraft(input, traceId).finally(() => {
+      this.inFlight.delete(key);
+    });
+    this.inFlight.set(key, task);
+    return task;
+  }
+
+  private async executeCreateDraft(input: PublisherDraftRequest, traceId?: string): Promise<PublisherDraftResult> {
     const credentials = serverWechatCredentials();
 
     this.log(input, "validate", "start", undefined, traceId, {
@@ -262,12 +287,44 @@ function validateArticle(article: GithubArticle, input: PublisherDraftRequest) {
   if (!article.contentHtml || !article.contentHtml.trim()) {
     throw new HttpError(VALIDATION_STATUS_CODE, "缺少 content.html 内容", "CONTENT_MISSING", undefined, false);
   }
-  if (!article.assets?.cover?.path) {
-    throw new HttpError(VALIDATION_STATUS_CODE, "缺少 assets.json 中的 cover 配置", "COVER_MISSING", undefined, false);
+  if (!article.assets || article.assets.schema_version !== 1) {
+    throw new HttpError(VALIDATION_STATUS_CODE, "assets.schema_version 必须是 1", "ARTICLE_SCHEMA_INVALID", undefined, false);
+  }
+  // MVP 约束：封面必需（Article Contract v1 中 cover.required = true）
+  if (!article.assets.cover || article.assets.cover.required === false) {
+    throw new HttpError(VALIDATION_STATUS_CODE, "MVP 要求封面必需（assets.json cover.required 不可为 false）", "COVER_MISSING", undefined, false);
+  }
+  if (!article.assets.cover.path || !article.assets.cover.path.trim()) {
+    throw new HttpError(VALIDATION_STATUS_CODE, "缺少 assets.json 中的 cover.path", "COVER_MISSING", undefined, false);
   }
   if (!article.cover || article.cover.buffer.length === 0) {
     throw new HttpError(VALIDATION_STATUS_CODE, "封面文件为空或不可读", "COVER_MISSING", undefined, false);
   }
+}
+
+function assertAllowedRepository(repository: string) {
+  const normalized = repository.trim();
+  const allowed = parseAllowedRepositories();
+  if (!allowed.includes(normalized)) {
+    throw new HttpError(
+      403,
+      `repository 不在允许的 Content Repository 列表内`,
+      "FORBIDDEN_REPOSITORY",
+      { repository: normalized },
+      false
+    );
+  }
+}
+
+function parseAllowedRepositories() {
+  return appConfig.publisherAllowedRepositories
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function idempotencyKey(articleId: string, sourceCommit: string) {
+  return `${articleId}::${sourceCommit}`;
 }
 
 function serverWechatCredentials(): WechatCredentials {
