@@ -219,7 +219,7 @@ GitHub Content Hub（yaai-content-hub）
 ```
 
 - **认证**：`Authorization: Bearer <PUBLISHER_WEBHOOK_TOKEN>`，未认证返回稳定 `401`。
-- **幂等**：键为 `article_id + source_commit`。重复调用返回上一次成功结果（`idempotent_replay = true`），不重复创建草稿；不可重试失败（如 `status != ready_to_upload`）会快速返回，GitHub 拉取等调用微信之前的失败按 `retryable` 标记允许重试。**并发保护**：同一幂等键的并发请求在单进程内合并，同时只允许一个微信草稿创建流程执行，后续请求等待并复用首个执行结果（不再调用微信）。**Fail-closed 保护**：第一次调用微信之前先持久化 `status = processing`；微信阶段任何失败（或草稿已创建但成功状态未持久化）都会让状态停留在 processing——后续请求返回 `409 DELIVERY_OUTCOME_UNKNOWN`（`retryable = false`，不再调用微信），需人工确认草稿箱后再处理，绝不盲目重试制造重复草稿。
+- **幂等**：键为 `article_id + source_commit`。重复调用返回上一次成功结果（`idempotent_replay = true`），不重复创建草稿；不可重试失败（如 `status != ready_to_upload`）会快速返回，GitHub 拉取等调用微信之前的失败按 `retryable` 标记允许重试。**并发保护**：同一幂等键的并发请求在单进程内合并，同时只允许一个微信草稿创建流程执行，后续请求等待并复用首个执行结果（不再调用微信）。**Fail-closed 保护**：第一次调用微信之前先持久化 `status = processing`（此 reserve 写入失败时尚未调用微信，返回可重试的 `500 STATE_SAVE_FAILED`，不锁定幂等键，下一次请求可安全重试）；微信阶段任何失败（或草稿已创建但成功状态未持久化）都会让状态停留在 processing——后续请求返回 `409 DELIVERY_OUTCOME_UNKNOWN`（`retryable = false`，不再调用微信），需人工确认草稿箱后再处理，绝不盲目重试制造重复草稿。
 - **白名单**：只允许读取配置好的 Content Repository（`PUBLISHER_ALLOWED_REPOSITORIES`，MVP 默认 `LyraWang6688/yaai-content-hub`），其余仓库返回 `403 FORBIDDEN_REPOSITORY`，不信任 `request.repository`。
 - **校验**：`meta.schema_version = 1`、`meta.article_id` 与请求一致、`meta.status = ready_to_upload`、`title`、`content.html` 必须存在；`assets.schema_version = 1` 且 MVP 要求封面必需（`cover.required` 不可为 `false`、`cover.path` 指向的文件必须存在），否则返回稳定 Error Contract（含 `code` / `message` / `retryable`）。
 - **Secret 归属**：`WECHAT_APP_ID / WECHAT_APP_SECRET / GITHUB_CONTENT_TOKEN` 只存在于 Publisher 服务器端；GitHub Actions 只持有 `PUBLISHER_ENDPOINT + PUBLISHER_WEBHOOK_TOKEN`。

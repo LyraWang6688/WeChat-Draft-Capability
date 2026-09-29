@@ -159,12 +159,27 @@ export class PublisherDraftService {
 
       // 在第一次真正调用微信之前先持久化 processing：
       // 此后任何失败都属于「结果未知」——草稿可能已创建，必须 fail-closed，绝不盲目重试
-      await this.store.save({
-        article_id: input.article_id,
-        source_commit: input.source_commit,
-        status: "processing",
-        uploaded_at: new Date().toISOString()
-      });
+      try {
+        await this.store.save({
+          article_id: input.article_id,
+          source_commit: input.source_commit,
+          status: "processing",
+          uploaded_at: new Date().toISOString()
+        });
+      } catch (error) {
+        // processing reserve 持久化失败发生在任何微信副作用之前：
+        // 不允许锁定该幂等键，返回稳定可重试错误，下一次相同请求可安全重试
+        this.log(input, "state_reserve", "failed", "STATE_SAVE_FAILED", traceId, {
+          message: error instanceof Error ? error.message : String(error)
+        });
+        throw new HttpError(
+          500,
+          "幂等状态写入失败（尚未调用微信，可安全重试）",
+          "STATE_SAVE_FAILED",
+          undefined,
+          true
+        );
+      }
       processingPersisted = true;
 
       this.log(input, "wechat_upload", "start", undefined, traceId, {});
@@ -207,8 +222,8 @@ export class PublisherDraftService {
       if (processingPersisted) {
         throw await this.failProcessing(input, error, "wechat_upload", traceId);
       }
-      // processing 尚未写入（本地准备阶段失败）：尚未调用微信，按常规分类处理
-      throw await this.fail(input, error, "wechat_upload", traceId);
+      // processing 尚未写入（本地准备或 reserve 阶段失败）：尚未调用微信，按常规分类处理
+      throw await this.fail(input, error, "state_reserve", traceId);
     } finally {
       if (tempDir) {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);

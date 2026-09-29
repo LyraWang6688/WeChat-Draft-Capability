@@ -29,7 +29,7 @@ export interface PublisherStateStore {
  * 写入采用「临时文件 + rename」原子替换，避免进程中断留下半截文件。
  */
 export class FilePublisherStateStore implements PublisherStateStore {
-  private readonly states = new Map<string, PublisherUploadState>();
+  private states = new Map<string, PublisherUploadState>();
   private loaded = false;
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -42,10 +42,21 @@ export class FilePublisherStateStore implements PublisherStateStore {
 
   async save(state: PublisherUploadState) {
     await this.ensureLoaded();
-    this.states.set(stateKey(state.article_id, state.source_commit), state);
-    const snapshot = [...this.states.values()];
-    this.writeChain = this.writeChain.then(() => this.writeSnapshot(snapshot));
+    // 写链串行化；前一次写失败不会阻塞后续写入（链上吞掉历史错误，当前写单独向调用方抛错）
+    this.writeChain = this.writeChain.catch(() => undefined).then(() => this.writeAndCommit(state));
     await this.writeChain;
+  }
+
+  /**
+   * 先基于当前内存状态构造 next snapshot 并 durable 写盘，
+   * 写盘成功之后才把内存更新为 next——避免「磁盘写失败但内存 Map 已变更」的状态分裂。
+   * 只有 durable write 成功后，内存状态才视为正式更新。
+   */
+  private async writeAndCommit(state: PublisherUploadState) {
+    const next = new Map(this.states);
+    next.set(stateKey(state.article_id, state.source_commit), state);
+    await this.writeSnapshot([...next.values()]);
+    this.states = next;
   }
 
   private async ensureLoaded() {

@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -152,7 +152,7 @@ const ENV_KEYS = [
   "PUBLISHER_STATE_FILE"
 ] as const;
 
-async function bootApp(files: Map<string, Buffer>, mockOptions: MockOptions = {}) {
+async function bootApp(files: Map<string, Buffer>, mockOptions: MockOptions = {}, stateFileOverride?: string) {
   githubCalls = [];
   wechatCalls = [];
   stateDir = mkdtempSync(path.join(os.tmpdir(), "publisher-test-"));
@@ -162,7 +162,7 @@ async function bootApp(files: Map<string, Buffer>, mockOptions: MockOptions = {}
   process.env.PUBLISHER_WEBHOOK_TOKEN = WEBHOOK_TOKEN;
   process.env.WECHAT_APP_ID = WECHAT_APP_ID;
   process.env.WECHAT_APP_SECRET = WECHAT_APP_SECRET;
-  process.env.PUBLISHER_STATE_FILE = path.join(stateDir, "publisher-state.json");
+  process.env.PUBLISHER_STATE_FILE = stateFileOverride ?? path.join(stateDir, "publisher-state.json");
   const { createApp } = await import("../app.js");
   const app = createApp();
   server = app.listen(0);
@@ -485,5 +485,31 @@ describe("POST /api/publisher/drafts", () => {
     const draftCalls = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add"));
     expect(draftCalls).toHaveLength(0);
     expect(githubCalls).toHaveLength(0);
+  });
+
+  it("15. processing reserve 持久化失败返回 STATE_SAVE_FAILED（可重试），不调用微信且不锁定", async () => {
+    await bootApp(buildFiles());
+    // 预创建原子写入的临时文件路径为目录，使 writeFile(tmp) 抛 EISDIR：
+    // processing reserve 无法落盘，但此时尚未调用微信
+    const tmpPath = path.join(stateDir, `publisher-state.json.${process.pid}.tmp`);
+    mkdirSync(tmpPath);
+
+    const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(first.status).toBe(500);
+    const firstBody = (await first.json()) as { error: { code: string; retryable: boolean } };
+    expect(firstBody.error.code).toBe("STATE_SAVE_FAILED");
+    expect(firstBody.error.retryable).toBe(true);
+    // 微信从未被调用（失败发生在任何微信副作用之前）
+    expect(wechatCalls).toHaveLength(0);
+
+    // 未锁定：第二次相同请求重新走完整流程（再次拉取 GitHub），而非被 processing 锁死
+    const githubCallsAfterFirst = githubCalls.length;
+    const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(second.status).toBe(500);
+    const secondBody = (await second.json()) as { error: { code: string; retryable: boolean } };
+    expect(secondBody.error.code).toBe("STATE_SAVE_FAILED");
+    expect(secondBody.error.retryable).toBe(true);
+    expect(githubCalls.length).toBeGreaterThan(githubCallsAfterFirst);
+    expect(wechatCalls).toHaveLength(0);
   });
 });
