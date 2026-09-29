@@ -107,6 +107,17 @@ export class PublisherDraftService {
           idempotent_replay: true
         };
       }
+      // fail-closed：该键曾进入微信流程但结果未知（草稿可能已创建），绝不再调用微信
+      if (existing.status === "processing") {
+        this.log(input, "idempotency", "replay_processing", existing.error_code, traceId, {});
+        throw new HttpError(
+          409,
+          `该版本微信草稿创建结果未知（${existing.error_code ?? "processing"}），已锁定，需人工确认后再处理`,
+          "DELIVERY_OUTCOME_UNKNOWN",
+          undefined,
+          false
+        );
+      }
       if (existing.status === "failed" && existing.retryable === false) {
         this.log(input, "idempotency", "replay_failure", existing.error_code, traceId, {});
         throw new HttpError(
@@ -139,11 +150,22 @@ export class PublisherDraftService {
     }
 
     let tempDir: string | undefined;
+    let processingPersisted = false;
     try {
       await mkdir(path.join(process.cwd(), ".data"), { recursive: true });
       tempDir = await mkdtemp(path.join(process.cwd(), ".data", "publisher-cover-"));
       const coverPath = path.join(tempDir, sanitizeFileName(article.cover.fileName));
       await writeFile(coverPath, article.cover.buffer);
+
+      // 在第一次真正调用微信之前先持久化 processing：
+      // 此后任何失败都属于「结果未知」——草稿可能已创建，必须 fail-closed，绝不盲目重试
+      await this.store.save({
+        article_id: input.article_id,
+        source_commit: input.source_commit,
+        status: "processing",
+        uploaded_at: new Date().toISOString()
+      });
+      processingPersisted = true;
 
       this.log(input, "wechat_upload", "start", undefined, traceId, {});
       const material = await this.wechat.uploadPermanentImage({
@@ -181,6 +203,11 @@ export class PublisherDraftService {
         idempotent_replay: false
       };
     } catch (error) {
+      // processing 已持久化：微信阶段失败，结果未知，fail-closed
+      if (processingPersisted) {
+        throw await this.failProcessing(input, error, "wechat_upload", traceId);
+      }
+      // processing 尚未写入（本地准备阶段失败）：尚未调用微信，按常规分类处理
       throw await this.fail(input, error, "wechat_upload", traceId);
     } finally {
       if (tempDir) {
@@ -189,6 +216,50 @@ export class PublisherDraftService {
     }
 
     throw new HttpError(500, "内部错误", "INTERNAL_ERROR", undefined, false);
+  }
+
+  /**
+   * 微信阶段失败（processing 已持久化）：
+   * 结果未知——草稿可能已创建，绝不能自动重试制造重复草稿。
+   * 状态保留 processing 并记录失败原因（供人工排查），返回稳定不可重试错误。
+   */
+  private async failProcessing(
+    input: PublisherDraftRequest,
+    error: unknown,
+    currentStep: string,
+    traceId?: string
+  ): Promise<HttpError> {
+    const failure = classifyFailure(error);
+    this.log(input, currentStep, "failed", failure.code, traceId, {
+      message: error instanceof Error ? error.message : String(error)
+    });
+
+    try {
+      await this.store.save({
+        article_id: input.article_id,
+        source_commit: input.source_commit,
+        status: "processing",
+        uploaded_at: new Date().toISOString(),
+        error_code: failure.code,
+        error_message: failure.message,
+        status_code: failure.statusCode
+      });
+    } catch (saveError) {
+      logger.error("publisher_state_save_failed", {
+        traceId,
+        article_id: input.article_id,
+        source_commit: input.source_commit,
+        message: saveError instanceof Error ? saveError.message : String(saveError)
+      });
+    }
+
+    return new HttpError(
+      409,
+      `微信草稿创建结果未知（${failure.code}），已锁定为 processing，需人工确认后再处理`,
+      "DELIVERY_OUTCOME_UNKNOWN",
+      undefined,
+      false
+    );
   }
 
   private async fail(

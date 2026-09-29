@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../utils/logger.js";
 
-export type PublisherUploadStatus = "uploaded_to_wechat" | "failed";
+export type PublisherUploadStatus = "processing" | "uploaded_to_wechat" | "failed";
 
 export type PublisherUploadState = {
   article_id: string;

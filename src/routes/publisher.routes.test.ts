@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -333,20 +333,28 @@ describe("POST /api/publisher/drafts", () => {
     expect(body.error.retryable).toBe(true);
   });
 
-  it("8. 微信草稿失败返回 WECHAT_DRAFT_ADD_FAILED，且可重试调用会重新尝试", async () => {
+  it("8. 微信草稿失败后状态锁定 processing，重复调用 fail-closed 不再调用微信", async () => {
     await bootApp(buildFiles(), { wechatDraftError: true });
     const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
-    expect(first.status).toBe(502);
+    // 微信阶段失败：结果未知（草稿可能已创建），返回稳定不可重试错误
+    expect(first.status).toBe(409);
     const firstBody = (await first.json()) as { error: { code: string; retryable: boolean } };
-    expect(firstBody.error.code).toBe("WECHAT_DRAFT_ADD_FAILED");
-    expect(firstBody.error.retryable).toBe(true);
+    expect(firstBody.error.code).toBe("DELIVERY_OUTCOME_UNKNOWN");
+    expect(firstBody.error.retryable).toBe(false);
 
     const draftCallsAfterFirst = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add")).length;
+    const githubCallsAfterFirst = githubCalls.length;
+
+    // 第二次调用：状态为 processing，绝不再调用微信，也不再拉取 GitHub
     const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
-    expect(second.status).toBe(502);
+    expect(second.status).toBe(409);
+    const secondBody = (await second.json()) as { error: { code: string; retryable: boolean } };
+    expect(secondBody.error.code).toBe("DELIVERY_OUTCOME_UNKNOWN");
+    expect(secondBody.error.retryable).toBe(false);
+
     const draftCallsAfterSecond = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add")).length;
-    // retryable 失败：第二次调用会重新尝试，而不是快速失败
-    expect(draftCallsAfterSecond).toBe(draftCallsAfterFirst + 1);
+    expect(draftCallsAfterSecond).toBe(draftCallsAfterFirst);
+    expect(githubCalls.length).toBe(githubCallsAfterFirst);
   });
 
   it("9. Secret 不出现在日志或返回值", async () => {
@@ -444,5 +452,38 @@ describe("POST /api/publisher/drafts", () => {
     const body = (await response.json()) as { error: { code: string; retryable: boolean } };
     expect(body.error.code).toBe("COVER_MISSING");
     expect(body.error.retryable).toBe(false);
+  });
+
+  it("14. 预置 processing 状态后重复调用返回 DELIVERY_OUTCOME_UNKNOWN，微信调用为 0", async () => {
+    await bootApp(buildFiles());
+    // 预置 processing：模拟「微信草稿可能已创建，但成功状态未持久化」的场景
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: SOURCE_COMMIT,
+            status: "processing",
+            uploaded_at: new Date().toISOString()
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { error: { code: string; retryable: boolean } };
+    expect(body.error.code).toBe("DELIVERY_OUTCOME_UNKNOWN");
+    expect(body.error.retryable).toBe(false);
+
+    // fail-closed：不触发任何 GitHub / 微信调用
+    const draftCalls = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add"));
+    expect(draftCalls).toHaveLength(0);
+    expect(githubCalls).toHaveLength(0);
   });
 });
