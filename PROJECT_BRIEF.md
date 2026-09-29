@@ -428,6 +428,7 @@ lark-cli base +workflow-enable --base-token "<base_token>" --workflow-id "<workf
 - 日志与返回体绝不包含任何 Secret；失败错误带 `code / message / retryable`。
 - 幂等：`article_id + source_commit`；同一键的并发请求在单进程内合并（in-flight 去重），只允许一个微信草稿创建流程执行，后续请求等待并复用首个结果（多副本部署需迁移共享存储 + 分布式锁）。
 - Fail-closed：第一次调用微信前先持久化 `status = processing`（reserve 写入失败 → `STATE_SAVE_FAILED` 500 retryable=true，尚未调用微信、不锁键、可安全重试）；微信阶段失败或草稿已创建但成功状态未持久化 → 状态停留 processing，后续请求返回 `DELIVERY_OUTCOME_UNKNOWN`（409，retryable=false，不再调用微信），需人工确认，绝不自动重试。
+- 状态存储初始化：首次访问创建唯一加载过程，并发调用共享等待同一初始化；状态文件损坏时持续 fail-closed（拒绝所有上传），不退化为空状态运行，避免丢失幂等账本。
 - 白名单：仅允许读取 `PUBLISHER_ALLOWED_REPOSITORIES`（MVP 默认 `LyraWang6688/yaai-content-hub`），不信任 `request.repository`。
 - 内容校验：`meta.schema_version == 1`、`meta.status == ready_to_upload`、`assets.schema_version == 1`、封面必需（`cover.required` 不可为 `false`）。
 

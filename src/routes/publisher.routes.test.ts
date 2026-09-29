@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -511,5 +511,70 @@ describe("POST /api/publisher/drafts", () => {
     expect(secondBody.error.retryable).toBe(true);
     expect(githubCalls.length).toBeGreaterThan(githubCallsAfterFirst);
     expect(wechatCalls).toHaveLength(0);
+  });
+
+  it("16. 损坏状态文件首次与再次访问均失败，不退化为空状态继续执行", async () => {
+    await bootApp(buildFiles());
+    // 预置损坏的状态文件（非法 JSON）
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(statePath, "{not-valid-json", "utf8");
+
+    const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(first.status).toBe(500);
+    const firstBody = (await first.json()) as { error: { code: string } };
+    expect(firstBody.error.code).toBe("INTERNAL_ERROR");
+    expect(wechatCalls).toHaveLength(0);
+
+    // 第二次访问仍然失败：loadPromise 保持 rejected，不得因 loaded flag 退化为空状态
+    const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(second.status).toBe(500);
+    const secondBody = (await second.json()) as { error: { code: string } };
+    expect(secondBody.error.code).toBe("INTERNAL_ERROR");
+    expect(wechatCalls).toHaveLength(0);
+    expect(githubCalls).toHaveLength(0);
+  });
+
+  it("17. 并发首次访问共享同一初始化，预置状态记录不丢失", async () => {
+    // 预置一条其他键的已上传记录，模拟真实幂等账本
+    await bootApp(buildFiles(), { delayMs: 20 });
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: "2026-09-29-other-topic",
+            source_commit: "othercommit123",
+            status: "uploaded_to_wechat",
+            wechat_draft_media_id: "other_draft_1",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      postDraft(`Bearer ${WEBHOOK_TOKEN}`),
+      postDraft(`Bearer ${WEBHOOK_TOKEN}`)
+    ]);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+
+    // 预置记录仍在（并发首次 find/save 等待同一初始化，写盘未覆盖旧账本）
+    const finalContent = JSON.parse(readFileSync(statePath, "utf8")) as Array<Record<string, unknown>>;
+    const preset = finalContent.find((item) => item.article_id === "2026-09-29-other-topic");
+    expect(preset).toBeDefined();
+    expect(preset?.status).toBe("uploaded_to_wechat");
+
+    // 新上传记录也已写入
+    const uploaded = finalContent.find((item) => item.article_id === ARTICLE_ID);
+    expect(uploaded).toBeDefined();
+    expect(uploaded?.status).toBe("uploaded_to_wechat");
+
+    const draftCalls = wechatCalls.filter((url) => url.includes("/cgi-bin/draft/add"));
+    expect(draftCalls).toHaveLength(1);
   });
 });
