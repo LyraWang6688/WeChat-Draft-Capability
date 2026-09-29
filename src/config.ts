@@ -18,5 +18,12 @@ export const appConfig = {
   logCliStdoutMaxChars: Number(process.env.LOG_CLI_STDOUT_MAX_CHARS || 4000),
   logCliStderrMaxChars: Number(process.env.LOG_CLI_STDERR_MAX_CHARS || 4000),
   wechatApiTimeoutMs: Number(process.env.WECHAT_API_TIMEOUT_MS || 120000),
+  githubApiTimeoutMs: Number(process.env.GITHUB_API_TIMEOUT_MS || 30000),
+  githubContentToken: process.env.GITHUB_CONTENT_TOKEN || "",
+  wechatAppId: process.env.WECHAT_APP_ID || "",
+  wechatAppSecret: process.env.WECHAT_APP_SECRET || "",
+  publisherWebhookToken: process.env.PUBLISHER_WEBHOOK_TOKEN || "",
+  publisherStateFile: process.env.PUBLISHER_STATE_FILE || path.resolve(process.cwd(), ".data", "publisher-state.json"),
+  publisherAllowedRepositories: process.env.PUBLISHER_ALLOWED_REPOSITORIES || "LyraWang6688/yaai-content-hub",
   publicDir: path.resolve(__dirname, "..", "public")
 };

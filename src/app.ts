@@ -10,6 +10,7 @@ import { feishuWebhookRouter } from "./routes/feishuWebhook.routes.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { larkBaseRouter } from "./routes/larkBase.routes.js";
 import { larkSharedRouter } from "./routes/larkShared.routes.js";
+import { publisherRouter } from "./routes/publisher.routes.js";
 import { systemRouter } from "./routes/system.routes.js";
 import { templateRouter } from "./routes/template.routes.js";
 import { logger } from "./utils/logger.js";
@@ -36,6 +37,7 @@ export function createApp() {
   app.use("/api/integrations", integrationConfigRouter);
   app.use("/api/templates", templateRouter);
   app.use("/api/webhooks/feishu", feishuWebhookRouter);
+  app.use("/api/publisher", publisherRouter);
 
   app.use((_req, res) => {
     res.status(404).json({
@@ -61,7 +63,8 @@ export function createApp() {
         error: {
           message: error.message,
           code: error.code,
-          details: error.details
+          details: error.details,
+          retryable: error.retryable
         }
       });
       return;

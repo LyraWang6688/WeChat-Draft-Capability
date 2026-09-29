@@ -402,6 +402,8 @@ lark-cli base +workflow-enable --base-token "<base_token>" --workflow-id "<workf
 - 记录 upsert 写回接口。
 - 模板表自动创建接口。
 - webhook 接口。
+- GitHub Content Hub → 微信草稿的 Publisher API（`POST /api/publisher/drafts`），含 Bearer 鉴权、`article_id + source_commit` 幂等持久化（独立 `PublisherStateStore` 边界）、GitHub 内容拉取（`GithubContentService`）、内容校验与稳定 Error Contract。
+- GitHub/微信依赖边界的 vitest 测试（`src/routes/publisher.routes.test.ts`）。
 - GitHub README、环境变量说明、部署说明初版。
 
 未完成：
@@ -409,6 +411,26 @@ lark-cli base +workflow-enable --base-token "<base_token>" --workflow-id "<workf
 - workflow 自动创建。
 - 微信 API 接入。
 - 配置持久化。
+
+## 11. Publisher API 增量说明
+
+新增模块（不影响飞书链路）：
+
+- `src/services/githubContent.service.ts`：GitHub Content Hub Adapter，按 `articles/{year}/{article_id}/` 读取 `meta.json / content.html / assets.json / cover`，使用服务器端 `GITHUB_CONTENT_TOKEN`（Fine-grained PAT，Contents Read-only），拉取时以 `source_commit` 精确锁定版本。
+- `src/services/publisherStorage.service.ts`：幂等状态存储，独立 `PublisherStateStore` 接口 + 本地 JSON 文件实现（原子写），后续可替换为 SQLite / 数据库。
+- `src/services/publisher.service.ts`：Publisher 编排（校验 → 幂等 → 拉取 → 上传素材 → 建草稿 → 持久化），复用现有 `WechatService`。
+- `src/middleware/publisherAuth.ts` + `src/routes/publisher.routes.ts`：`POST /api/publisher/drafts`，Bearer `PUBLISHER_WEBHOOK_TOKEN` 鉴权。
+
+关键约定：
+
+- 微信凭证走服务器端 `WECHAT_APP_ID / WECHAT_APP_SECRET`，不依赖 `baseToken / tableId`。
+- 不允许自动正式发布/群发；上传草稿 ≠ 发布，正式发布由 Lyra 人工完成。
+- 日志与返回体绝不包含任何 Secret；失败错误带 `code / message / retryable`。
+- 幂等：`article_id + source_commit`；同一键的并发请求在单进程内合并（in-flight 去重），只允许一个微信草稿创建流程执行，后续请求等待并复用首个结果（多副本部署需迁移共享存储 + 分布式锁）。
+- Fail-closed：第一次调用微信前先持久化 `status = processing`（reserve 写入失败 → `STATE_SAVE_FAILED` 500 retryable=true，尚未调用微信、不锁键、可安全重试）；微信阶段失败或草稿已创建但成功状态未持久化 → 状态停留 processing，后续请求返回 `DELIVERY_OUTCOME_UNKNOWN`（409，retryable=false，不再调用微信），需人工确认，绝不自动重试。
+- 状态存储初始化：首次访问创建唯一加载过程，并发调用共享等待同一初始化；状态文件损坏时持续 fail-closed（拒绝所有上传），不退化为空状态运行，避免丢失幂等账本；不允许 partial recovery——任一记录语义无效（article_id/source_commit 非空、status 三态、uploaded_at 非空、uploaded_to_wechat 必含 media_id）即整体加载失败。
+- 白名单：仅允许读取 `PUBLISHER_ALLOWED_REPOSITORIES`（MVP 默认 `LyraWang6688/yaai-content-hub`），不信任 `request.repository`。
+- 内容校验：`meta.schema_version == 1`、`meta.status == ready_to_upload`、`assets.schema_version == 1`、封面必需（`cover.required` 不可为 `false`）。
 
 ## 10. 给其他 AI 的注意事项
 

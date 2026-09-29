@@ -12,7 +12,9 @@
     "pm2:dev:restart": "pm2 restart wechat-article-pilot-dev",
     "pm2:dev:logs": "pm2 logs wechat-article-pilot-dev",
     "pm2:dev:stop": "pm2 stop wechat-article-pilot-dev",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -27,6 +29,7 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.2"
   }
 }
