@@ -52,10 +52,10 @@ type GithubContentsEntry = {
 const ARTICLE_ID_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}-/;
 
 /**
- * GitHub Content Hub Adapter。
+ * Single-Repo Content Workspace Adapter。
  *
- * 职责：按 Article Contract v1 从 Content Hub（私有仓库）读取
- *   articles/{year}/{article_id}/ 下的 meta.json / content.html / assets.json / cover。
+ * 职责：按冻结的 Single-Repo Content Contract 从 canonical 仓库读取
+ *   content/articles/{year}/{article_id}/ 下的 meta.json / content.html / assets.json / cover。
  *
  * 只做读取，不知道微信 API 的实现；token 只用于 Authorization 头，绝不写入日志或返回体。
  */
@@ -74,7 +74,7 @@ export class GithubContentService {
     const { repository, articleId, sourceCommit, traceId } = input;
     const { owner, repo } = parseRepository(repository);
     const articleDir = resolveArticleDir(articleId);
-    const basePath = `articles/${articleDir}/${articleId}`;
+    const basePath = `content/articles/${articleDir}/${articleId}`;
 
     logger.info("publisher_draft_github_fetch_start", {
       traceId,

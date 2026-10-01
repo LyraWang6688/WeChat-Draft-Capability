@@ -14,8 +14,8 @@ const WECHAT_ACCESS_TOKEN = "wechat_access_token_test";
 
 const ARTICLE_ID = "2026-09-29-ai-tools";
 const SOURCE_COMMIT = "abc123def456";
-const REPOSITORY = "LyraWang6688/yaai-content-hub";
-const BASE = `articles/2026/${ARTICLE_ID}`;
+const REPOSITORY = "LyraWang6688/wechat-article-pilot";
+const BASE = `content/articles/2026/${ARTICLE_ID}`;
 
 type FixtureOptions = {
   meta?: unknown;
@@ -641,5 +641,28 @@ describe("POST /api/publisher/drafts", () => {
     // 不允许重新调用微信 / GitHub
     expect(wechatCalls).toHaveLength(0);
     expect(githubCalls).toHaveLength(0);
+  });
+
+  it("20. Single-Repo Contract：GitHub Adapter 必须请求 content/articles/ 路径而非旧 articles/ 路径", async () => {
+    await bootApp(buildFiles());
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(200);
+
+    // 必须请求新的 Single-Repo Content Workspace 根路径
+    const newRootRequests = githubCalls.filter((url) =>
+      url.includes(`/contents/content/articles/2026/${ARTICLE_ID}/`)
+    );
+    expect(newRootRequests.length).toBeGreaterThan(0);
+
+    // 不得请求旧的 Content Hub 根路径（防止以后路径回退）
+    const legacyRootRequests = githubCalls.filter((url) =>
+      url.includes(`/contents/articles/2026/${ARTICLE_ID}/`)
+    );
+    expect(legacyRootRequests).toHaveLength(0);
+
+    // source_commit 仍作为 ?ref=（不得退化为 main）
+    const metaRequest = newRootRequests.find((url) => url.includes("/meta.json"));
+    expect(metaRequest).toBeTruthy();
+    expect(metaRequest).toContain(`?ref=${SOURCE_COMMIT}`);
   });
 });
