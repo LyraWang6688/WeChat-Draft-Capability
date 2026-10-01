@@ -776,52 +776,78 @@ describe("POST /api/publisher/drafts", () => {
     expect(finalContent[0]?.wechat_draft_media_id).toBe("draft_test_1");
   });
 
-  it("25. Ledger source_commit 非 canonical（short / main / uppercase / whitespace）：整体 fail-closed", async () => {
+  it.each([
+    ["short SHA", "abc123def456"],
+    ["mutable ref", "main"],
+    ["uppercase 40-char SHA", "0123456789ABCDEF0123456789ABCDEF01234567"],
+    ["whitespace-padded SHA", " 0123456789abcdef0123456789abcdef01234567"]
+  ])("25.%# Ledger source_commit 非 canonical（%s）：独立 fresh load 即 fail-closed", async (_label, bad) => {
+    // 每个 case 都是全新生命周期：干净 state file + 新的 StateStore / App / Ledger load。
+    // 这样能证明：该 bad value 本身被 Ledger validator 独立拒绝，
+    // 而不是复用了先前 rejected 的 loadPromise。
     await bootApp(buildFiles());
-    const invalidLedgerCommits = [
-      "abc123def456", // short SHA
-      "main", // mutable ref
-      "0123456789ABCDEF0123456789ABCDEF01234567", // uppercase 40-char
-      " 0123456789abcdef0123456789abcdef01234567" // whitespace-padded
-    ];
-    for (const bad of invalidLedgerCommits) {
-      const statePath = path.join(stateDir, "publisher-state.json");
-      writeFileSync(
-        statePath,
-        JSON.stringify(
-          [
-            {
-              article_id: ARTICLE_ID,
-              source_commit: bad,
-              status: "failed",
-              retryable: false,
-              error_code: "ARTICLE_NOT_READY",
-              uploaded_at: "2026-09-29T00:00:00.000Z"
-            }
-          ],
-          null,
-          2
-        ),
-        "utf8"
-      );
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: bad,
+            status: "failed",
+            retryable: false,
+            error_code: "ARTICLE_NOT_READY",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
 
-      // 首次访问即 fail-closed
-      const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
-      expect(first.status).toBe(500);
-      const firstBody = (await first.json()) as { error: { code: string } };
-      expect(firstBody.error.code).toBe("INTERNAL_ERROR");
-
-      // 后续 find/save 继续 fail-closed（loadPromise 保持 rejected）
-      const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
-      expect(second.status).toBe(500);
-
-      // 不触发任何 GitHub / 微信调用
-      expect(githubCalls).toHaveLength(0);
-      expect(wechatCalls).toHaveLength(0);
-    }
+    // 首次访问即因该值触发 Ledger validation fail-closed
+    const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(first.status).toBe(500);
+    const firstBody = (await first.json()) as { error: { code: string } };
+    expect(firstBody.error.code).toBe("INTERNAL_ERROR");
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
   });
 
-  it("26. Ledger source_commit 合法 lowercase 40-char SHA：正常 load 且幂等生效", async () => {
+  it("26. Ledger 一旦 load failure：第二次访问继续 fail-closed（rejected loadPromise 保持）", async () => {
+    await bootApp(buildFiles());
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: "abc123def456",
+            status: "failed",
+            retryable: false,
+            error_code: "ARTICLE_NOT_READY",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    // 第一次 load 失败
+    const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(first.status).toBe(500);
+    // 第二次复用同一 rejected loadPromise，仍 fail-closed，不退化空状态
+    const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(second.status).toBe(500);
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
+  });
+
+  it("27. Ledger source_commit 合法 lowercase 40-char SHA：正常 load 且幂等生效", async () => {
     await bootApp(buildFiles());
     const statePath = path.join(stateDir, "publisher-state.json");
     writeFileSync(
