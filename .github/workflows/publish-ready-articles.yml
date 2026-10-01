@@ -1,0 +1,214 @@
+name: Publish Ready Articles to WeChat Drafts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "content/articles/**"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run: log requests but do not call the Publisher API"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: publish-ready-articles-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Detect ready_to_upload and call Publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PUBLISHER_ENDPOINT: ${{ secrets.PUBLISHER_ENDPOINT }}
+      PUBLISHER_WEBHOOK_TOKEN: ${{ secrets.PUBLISHER_WEBHOOK_TOKEN }}
+    steps:
+      - name: Enforce main branch for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "::error::workflow_dispatch 只允许在 main 分支运行（当前 ${{ github.ref }}）。未 Merge 的 feature branch 内容不允许直接送入微信公众号草稿箱。"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate content (Content Domain gate)
+        run: |
+          node scripts/validate-content.mjs
+
+      - name: Detect article directories that entered ready_to_upload
+        id: detect
+        run: |
+          set -euo pipefail
+
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          HEAD_SHA="${{ github.sha }}"
+          BASE_SHA="${{ github.event.before }}"
+
+          # For manual dispatch, diff the selected branch head against its parent.
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            BASE_SHA="$(git rev-parse "${HEAD_SHA}^" 2>/dev/null || echo "$ZERO_SHA")"
+          fi
+
+          # Changed files under content/articles/ since the previous state.
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" == "$ZERO_SHA" ]]; then
+            echo "::notice::No previous commit to diff against; evaluating current HEAD state."
+            CHANGED_FILES="$(git ls-tree -r --name-only "$HEAD_SHA" -- content/articles/ || true)"
+          else
+            CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- content/articles/ || true)"
+          fi
+
+          # Candidate article directories of the form content/articles/{year}/{article_id}/.
+          DIRS="$(printf '%s\n' "$CHANGED_FILES" \
+            | sed -nE 's#^(content/articles/[0-9]{4}/[^/]+)/.*#\1#p' \
+            | sort -u)"
+
+          if [[ -z "$DIRS" ]]; then
+            echo "No changed article directories detected; nothing to publish."
+            echo "changed_dirs=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Auto-publish ONLY on a status transition INTO ready_to_upload
+          # (e.g. draft -> ready_to_upload). An article that is already
+          # ready_to_upload must NOT be re-uploaded when only its content
+          # (source.md / content.html / assets) changes in a later commit.
+          TRANSITION_DIRS=""
+          while IFS= read -r dir; do
+            [[ -z "$dir" ]] && continue
+
+            if [[ -z "$BASE_SHA" || "$BASE_SHA" == "$ZERO_SHA" ]]; then
+              base_status="<none>"
+            else
+              base_meta="$(git show "$BASE_SHA:$dir/meta.json" 2>/dev/null || true)"
+              if [[ -n "$base_meta" ]]; then
+                base_status="$(printf '%s\n' "$base_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
+              else
+                base_status="<none>"
+              fi
+            fi
+
+            head_meta="$(git show "$HEAD_SHA:$dir/meta.json" 2>/dev/null || true)"
+            if [[ -n "$head_meta" ]]; then
+              head_status="$(printf '%s\n' "$head_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
+            else
+              head_status="<none>"
+            fi
+
+            if [[ "$head_status" == "ready_to_upload" && "$base_status" != "ready_to_upload" ]]; then
+              TRANSITION_DIRS="${TRANSITION_DIRS}${dir}"$'\n'
+            else
+              echo "::notice::${dir}: no transition into ready_to_upload (${base_status} -> ${head_status}); skipped."
+            fi
+          done <<< "$DIRS"
+
+          if [[ -z "$TRANSITION_DIRS" ]]; then
+            echo "No article entered ready_to_upload in this change; nothing to publish."
+            echo "changed_dirs=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s\n' "${TRANSITION_DIRS%$'\n'}" > "${RUNNER_TEMP}/changed_dirs.txt"
+
+          JSON="[]"
+          while IFS= read -r dir; do
+            [[ -z "$dir" ]] && continue
+            JSON="$(printf '%s' "$JSON" | jq -c --arg d "$dir" '. + [$d]')"
+          done <<< "$TRANSITION_DIRS"
+          echo "changed_dirs=${JSON}" >> "$GITHUB_OUTPUT"
+
+          echo "Articles entering ready_to_upload:"
+          printf '%s\n' "${TRANSITION_DIRS%$'\n'}" | sed 's/^/  - /'
+
+      - name: Publish ready articles
+        if: steps.detect.outputs.changed_dirs != '[]'
+        run: |
+          set -euo pipefail
+
+          LIST_FILE="${RUNNER_TEMP}/changed_dirs.txt"
+          FAILED=0
+          COUNT=0
+
+          while IFS= read -r dir; do
+            [[ -z "$dir" ]] && continue
+            COUNT=$((COUNT + 1))
+
+            meta="${dir}/meta.json"
+            if [[ ! -f "$meta" ]]; then
+              echo "::warning::${dir}: meta.json not found; skipped."
+              continue
+            fi
+
+            status="$(jq -r '.status // ""' "$meta")"
+            if [[ "$status" != "ready_to_upload" ]]; then
+              echo "::notice::${dir}: status='${status}'; only ready_to_upload is published. Skipped."
+              continue
+            fi
+
+            article_id="$(jq -r '.article_id // ""' "$meta")"
+            if [[ -z "$article_id" ]]; then
+              article_id="$(basename "$dir")"
+            fi
+
+            body="$(jq -nc \
+              --arg repository "LyraWang6688/wechat-article-pilot" \
+              --arg article_id "$article_id" \
+              --arg ref "main" \
+              --arg source_commit "${GITHUB_SHA}" \
+              '{repository:$repository, article_id:$article_id, ref:$ref, source_commit:$source_commit}')"
+
+            echo "::notice::Ready article detected: ${dir} (article_id=${article_id})"
+            echo "Publisher request body: ${body}"
+
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              echo "::notice::dry_run=true: request logged, Publisher API not called for ${article_id}."
+              continue
+            fi
+
+            if [[ -z "${PUBLISHER_ENDPOINT:-}" || -z "${PUBLISHER_WEBHOOK_TOKEN:-}" ]]; then
+              echo "::error::${article_id}: PUBLISHER_ENDPOINT or PUBLISHER_WEBHOOK_TOKEN is not configured in repo secrets."
+              FAILED=1
+              continue
+            fi
+
+            url="${PUBLISHER_ENDPOINT%/}/api/publisher/drafts"
+            response="$(curl -sS --max-time 60 \
+              -w $'\n%{http_code}' \
+              -X POST "$url" \
+              -H "Authorization: Bearer ${PUBLISHER_WEBHOOK_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              -d "$body")" || true
+
+            http_code="$(printf '%s\n' "$response" | tail -n1)"
+            response_body="$(printf '%s\n' "$response" | sed '$d')"
+
+            ok_flag="$(printf '%s' "$response_body" | jq -r '.ok // false' 2>/dev/null || echo false)"
+            error_code="$(printf '%s' "$response_body" | jq -r '.error.code // empty' 2>/dev/null || true)"
+
+            if [[ "$http_code" =~ ^[0-9]{3}$ ]] && [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]] && [[ "$ok_flag" == "true" ]]; then
+              echo "::notice::${article_id}: Publisher accepted (HTTP ${http_code})."
+            else
+              echo "::error::${article_id}: Publisher request failed (HTTP ${http_code:-no-response}, publisher_error_code=${error_code:-unknown})."
+              FAILED=1
+            fi
+          done < "$LIST_FILE"
+
+          if [[ "$COUNT" -eq 0 ]]; then
+            echo "No changed article directories were processed."
+          fi
+
+          if [[ "$FAILED" -gt 0 ]]; then
+            echo "::error::One or more Publisher requests failed; marking workflow as failed. Manual re-run: GitHub Actions -> Re-run jobs."
+            exit 1
+          fi
