@@ -1,6 +1,6 @@
 # AI_HANDOFF
 
-本文件帮助任何 AI（或人类）快速理解 Content Workspace，无需递归读取所有文章。
+本文件帮助任何 AI（或人类）快速理解 Content Workspace，无需递归读取所有文章。全仓唯一 Current Agent Entry 为 [根 AGENTS.md](../AGENTS.md)。
 
 ## 读取顺序
 
@@ -27,3 +27,5 @@
 | --- | --- |
 | `draft` | 内容仍在编辑；允许 required asset 尚未齐全 |
 | `ready_to_upload` | 用户已允许自动化系统把当前版本送入微信公众号草稿箱；进入前要求所有 required asset 实际存在并验证通过 |
+
+上传授权绑定从 not-ready 进入 `ready_to_upload` 的 transition commit 对应版本；之后的 later edit 不自动授权。`draft → ready(B) → ready(C)` 授权 B；`draft → ready(B) → draft(C) → ready(D)` 授权 D。Publisher 按不可变 `source_commit` 获取版本，不回写 Content status。
