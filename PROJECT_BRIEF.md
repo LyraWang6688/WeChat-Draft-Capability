@@ -54,6 +54,13 @@ Publisher 不修改 content 内的 meta.json、不回写 Content status；Github
 - 写盘成功后再更新 memory；当前临时文件 + rename 原子替换未调用 fsync。
 - 白名单限制 repository；凭证留在服务端；单进程去重不等于多副本锁。
 
+## Brand Ownership
+
+正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+[content/brand/one-page-wechat.md](content/brand/one-page-wechat.md) 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth。规则直接在本仓库维护，不设外部 upstream 或同步副本，不另建 Brand SSOT。
+
+AI / Human 创作层是 flexible、Human-driven、non-linear；标题、润色、事实核查、GEO、排版、封面与 Publish Check 可按需要组合。Human Authorization Gate 后进入 deterministic、Contract-driven、fail-closed 的 Publishing Runtime；创作能力不插入 GitHub Action → Publisher 主链。本阶段不实现 Skill Orchestration。
+
 ## Known Gaps
 
 **KNOWN GAP / P1，当前未修复：**
@@ -66,7 +73,7 @@ Publisher 不修改 content 内的 meta.json、不回写 Content status；Github
 ## Legacy Status
 
 Feishu 已不是 Current Publishing Control Plane；runtime exposure retired。
-物理实现仍在 public、lark services、旧 routes/templates 等，分类 LEGACY_IMPLEMENTATION。删除延后至 E2E 并明确批准。
+物理实现仍在 public、lark services、旧 routes/templates 等，分类 LEGACY_IMPLEMENTATION。删除延后至 first real E2E approval。
 旧 Feishu 文档以 HISTORICAL ONLY 标识保留，不是当前任务或部署指令。
 
 ## Experimental Capabilities

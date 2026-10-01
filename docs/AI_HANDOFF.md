@@ -63,24 +63,33 @@ Content / Human Authorization Domain：draft、ready_to_upload 与文章内容�
 Publisher Delivery Domain：processing、uploaded_to_wechat、failed 与 media_id / 错误 / 时间。
 Publisher 不改文章 meta.json、不回写 Content status；GitHub adapter 当前 read-only。两套状态不能合并。
 
-## 8. Known P1 Gaps
+## 8. Brand Ownership / Creative Boundary
+
+正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+[content/brand/one-page-wechat.md](../content/brand/one-page-wechat.md) 是品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 SSOT，直接维护，不设外部 upstream 或同步副本，不另建 Brand SSOT。
+
+AI creation = Flexible / Human-driven / Non-linear；Title、Polish、Fact Check、GEO、Layout、Cover、Publish Check 可按需要组合。
+`AI / Human flexible creation → Human Authorization Gate → deterministic Publishing Runtime`。
+Publishing Runtime = Deterministic / Contract-driven / Fail-closed；创作阶段能力不属于 GitHub Action → Publisher 主链。本阶段只写清边界，不实现 Skill Orchestration。
+
+## 9. Known P1 Gaps
 
 **KNOWN GAP，仅记录，本阶段不修：**
 
 A. Validator 校验 HEAD，Publisher 可能发布 authorized commit；完整结构/资产校验未与授权版本绑定。
 B. Docs / Validator 支持 content_file/assets_file 引用，Publisher 固定 content.html/assets.json，filename Contract drift 未解决。
 
-## 9. Legacy Feishu Status
+## 10. Legacy Feishu Status
 
 Runtime decommissioned / exposure retired；旧 public、lark services、routes、templates 分类 **LEGACY_IMPLEMENTATION**，不是 CURRENT_ARCHITECTURE。
-Physical cleanup deferred until E2E 并获明确批准。
+Physical cleanup deferred until first real E2E approval。
 LARK_CLI_INIT_CONTEXT、TEMPLATE_SCHEMA、WORKFLOW_FEASIBILITY、CLI_INTEGRATION_LESSONS、REMOTE_SERVER_DEV 保留为历史资料，不执行其中旧联调或部署指令。
 
-## 10. Experimental MCP PR #3
+## 11. Experimental MCP PR #3
 
 [PR #3](https://github.com/LyraWang6688/wechat-article-pilot/pull/3) 是 Experimental / Deferred Product Channel；2026-10-02 核验 OPEN、未合并、未删除，不属于当前 main production path。未经明确决定不合并或删除。
 
-## 11. What NOT to Do
+## 12. What NOT to Do
 
 - repo hygiene 不发真实微信草稿，不触发默认会调用 API 的 workflow，不正式发布。
 - 不删除或改写 ledger，不改 secrets，不部署或重启，不改 PM2 name/path。
@@ -89,7 +98,7 @@ LARK_CLI_INIT_CONTEXT、TEMPLATE_SCHEMA、WORKFLOW_FEASIBILITY、CLI_INTEGRATION
 - 不把 content.html/assets.json 当垃圾，不重新排版内容。
 - 工作区非 clean 时先停下报告，不能覆盖用户修改；从最新 origin/main 确认事实。
 
-## 12. Safe Validation Commands
+## 13. Safe Validation Commands
 
 ```bash
 npm ci

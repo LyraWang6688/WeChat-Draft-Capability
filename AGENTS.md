@@ -27,6 +27,17 @@ Publisher 不改文章 meta.json、不回写 Content status；GithubContentServi
 processing 必须在第一次微信副作用前持久化；uploaded_to_wechat 可 replay；unknown outcome 保留 processing、不可自动重试。
 损坏 ledger、重复键、非法语义记录整体 fail-closed，不允许 partial recovery。写盘成功后才更新 memory state；当前临时文件 + rename 没有 fsync。单进程保护不等于多副本锁。
 
+## Brand Ownership
+
+正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+`content/brand/one-page-wechat.md` 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 SSOT。品牌规则直接在上述品牌文件维护，无外部 upstream / 同步副本关系；不另建 Brand SSOT。
+
+## Creative Layer vs Publishing Runtime
+
+AI Content Creation = Flexible / Human-driven / Non-linear，可按需要组合 Title、Polish、Fact Check、GEO、Layout、Cover、Publish Check。
+`AI / Human flexible creation → Human Authorization Gate → deterministic Publishing Runtime`。
+Publishing Runtime = Deterministic / Contract-driven / Fail-closed；不把创作能力塞进 GitHub Action → Publisher 主链。本阶段不实现 Skill Orchestration。
+
 ## Safety-Critical Files
 
 - .github/workflows/publish-ready-articles.yml：授权转换与不可变提交。
@@ -35,14 +46,15 @@ processing 必须在第一次微信副作用前持久化；uploaded_to_wechat �
 - src/services/publisherStorage.service.ts：ledger integrity、写入顺序。
 - .data/publisher-state.json：DELIVERY_STATE（或 PUBLISHER_STATE_FILE 配置路径）。
 - content/articles/**：完整 Article Package，路径必须含 content/。
+- content/brand/one-page-wechat.md：唯一正式 Brand SSOT。
 
 ## Never Treat As Garbage
 
-Publisher Ledger、content.html、assets.json、Human Authorization workflow、未经分类的历史文档。
+Publisher Ledger、content.html、assets.json、Human Authorization workflow、Brand SSOT、未经分类的历史文档。
 
 ## Legacy Feishu
 
-Feishu 非 Current Publishing Control Plane；Runtime = retired，Physical code = pending cleanup after E2E 并获明确批准。
+Feishu 非 Current Publishing Control Plane；Runtime = retired，Physical code = pending cleanup after first real E2E approval。
 public / lark services / legacy routes/templates 属于 LEGACY_IMPLEMENTATION；仍装配对象不表示旧路由暴露。
 
 ## Known P1 Gaps

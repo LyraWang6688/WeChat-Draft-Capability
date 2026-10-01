@@ -67,6 +67,17 @@ Human Intent → status transition → authorized commit
 
 **KNOWN CONTRACT GAP（P1，未修复）**：Docs / Validator 支持 `meta.content_file`、`meta.assets_file` 引用；Publisher 固定读取 `content.html`、`assets.json`。Validator 当前校验 HEAD，Publisher 可能交付较早的 authorized commit。不得宣称两者已完全一致。
 
+### Brand Ownership
+
+正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+[content/brand/one-page-wechat.md](content/brand/one-page-wechat.md) 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格与 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth，直接在本仓库维护，不建立外部 upstream 或同步副本关系。
+
+### Creative Layer / Publishing Runtime Boundary
+
+AI Content Creation 灵活、由 Human 驱动、非线性，可按需要组合标题、润色、事实核查、GEO、排版、封面与 Publish Check。创作遵循上述 Brand SSOT。
+`AI / Human flexible creation → Human Authorization Gate → deterministic Publishing Runtime`。
+Publishing Runtime 由 Contract 驱动并 fail-closed；创作能力不进入 GitHub Action → Publisher 主链。本阶段只定义边界，不实现 Skill Orchestration。
+
 ## 6. Publisher API
 
 `POST /api/publisher/drafts`，请求头 `Authorization: Bearer <PUBLISHER_WEBHOOK_TOKEN>`。
@@ -137,7 +148,7 @@ PM2 配置仍为 `wechat-article-pilot-dev`、`/opt/wechat-article-pilot-dev`；
 ## 10. Legacy Feishu Status
 
 Feishu 已不是 Current Publishing Control Plane。Legacy Feishu Runtime Exposure 已关闭（runtime decommissioned）；残留 `public/**`、lark services、旧 routes/templates 等分类为 **LEGACY_IMPLEMENTATION**，不是 CURRENT_ARCHITECTURE。服务装配仍构造部分 legacy 对象，不代表路由仍可访问。
-Physical cleanup deferred until E2E 并获得明确批准；本阶段不物理删除。旧资料保留原文并加 HISTORICAL ONLY 标识，不作为当前运行或部署指南。
+Physical cleanup deferred until first real E2E approval；本阶段不物理删除。旧资料保留原文并加 HISTORICAL ONLY 标识，不作为当前运行或部署指南。
 
 ## 11. Experimental MCP Channel
 
