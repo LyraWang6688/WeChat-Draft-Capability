@@ -7,15 +7,20 @@
  *   content/articles/
  *   content/index.json
  *
- * 校验项：
+ * 校验项（enforce Article Contract v1）：
  *  1. JSON 可解析（index.json / meta.json / assets.json）
  *  2. article_id 全局唯一（index 内 + 目录级）
  *  3. status 符合枚举（draft | ready_to_upload）
- *  4. index path 与 meta.article_id 匹配
- *  5. meta 文件引用存在（source_file / content_file / assets_file）
- *  6. index 与 meta 的 status / updated_at 一致
- *  7. draft 状态允许 required asset 缺失（非阻塞告警）
- *  8. ready_to_upload 状态要求所有 required asset 存在（阻塞失败）
+ *  4. index.path 必须为 canonical path（见 isCanonicalArticlePath）
+ *  5. index 记录仅允许 Contract 定义字段（无 Unexpected Fields）
+ *  6. index 与 meta 的 article_id / title / status / updated_at 一致
+ *  7. meta 文件引用（source_file / content_file / assets_file）：
+ *     non-empty string、相对路径、resolve 后位于当前 Article Package 内、文件存在
+ *  8. assets.cover.required 必须显式为 true（false 即 Contract violation）
+ *  9. assets.cover.path：non-empty string、相对路径、resolve 后位于 assets/ 内
+ *     （路径 Contract 非法即使 draft 也 FAIL；draft 只豁免"文件缺失"）
+ * 10. draft 状态允许 required asset 文件缺失（非阻塞告警）
+ * 11. ready_to_upload 状态要求所有 required asset 文件存在（阻塞失败）
  *
  * 用法：
  *   node scripts/validate-content.mjs [<repo-root>]
@@ -33,10 +38,12 @@ const ROOT = path.resolve(process.argv[2] || DEFAULT_ROOT);
 const CONTENT_ROOT = path.join(ROOT, "content");
 const INDEX_PATH = path.join(CONTENT_ROOT, "index.json");
 const ARTICLES_ROOT = path.join(CONTENT_ROOT, "articles");
+const ARTICLES_PREFIX = "content/articles/";
 
 const STATUS_ENUM = ["draft", "ready_to_upload"];
 const SCHEMA_VERSION = 1;
 const INDEX_RECORD_FIELDS = ["article_id", "title", "status", "path", "updated_at"];
+const ALLOWED_INDEX_FIELDS = new Set(INDEX_RECORD_FIELDS);
 const META_REQUIRED_FIELDS = [
   "schema_version",
   "article_id",
@@ -56,6 +63,49 @@ const check = (cond, msg) => {
   if (!cond) errors.push(msg);
 };
 const warn = (msg) => warnings.push(msg);
+
+/**
+ * 校验 index 记录 path 是否为 canonical：
+ *   content/articles/{year}/{article_id}/
+ * - repository-root relative（非绝对路径）
+ * - 以 content/articles/ 开头
+ * - 以 / 结尾
+ * - 不含任何 .. 段
+ * - year 与 article_id 前 4 位一致
+ * - 末段目录名与 article_id 完全一致
+ */
+function isCanonicalArticlePath(p, articleId) {
+  if (typeof p !== "string" || p === "") return false;
+  if (path.isAbsolute(p)) return false;
+  if (p.includes("..")) return false;
+  if (!p.endsWith("/")) return false;
+  if (!p.startsWith(ARTICLES_PREFIX)) return false;
+  const rest = p.slice(ARTICLES_PREFIX.length);
+  const parts = rest.split("/").filter(Boolean);
+  if (parts.length !== 2) return false;
+  const [year, dirId] = parts;
+  if (typeof articleId !== "string" || articleId === "") return false;
+  if (dirId !== articleId) return false;
+  if (year !== articleId.slice(0, 4)) return false;
+  return true;
+}
+
+/**
+ * 校验文件引用路径的边界：
+ * - 必须是 non-empty string
+ * - 不得为绝对路径
+ * - resolve 后必须仍位于 baseDir 之内（不允许 ../ escape）
+ */
+function checkRefInside(baseDir, ref, label, articleId) {
+  check(typeof ref === "string" && ref !== "", `[${articleId}] ${label} 必须是 non-empty string`);
+  if (typeof ref !== "string" || ref === "") return;
+  check(!path.isAbsolute(ref), `[${articleId}] ${label}(${ref}) 不得使用绝对路径`);
+  const resolved = path.resolve(baseDir, ref);
+  check(
+    resolved.startsWith(baseDir + path.sep),
+    `[${articleId}] ${label}(${ref}) 不得 escape 所属目录`
+  );
+}
 
 /* ---- 0. Content Workspace 存在性 ---- */
 check(fs.existsSync(CONTENT_ROOT), `Content Workspace 无效，缺少 content/ 目录: ${CONTENT_ROOT}`);
@@ -80,7 +130,16 @@ for (const record of articles) {
   for (const field of INDEX_RECORD_FIELDS) {
     check(record && field in record, `index 记录缺少字段 ${field}: ${record?.article_id ?? "(unknown)"}`);
   }
+  if (record && typeof record === "object") {
+    for (const field of Object.keys(record)) {
+      check(ALLOWED_INDEX_FIELDS.has(field), `index 记录包含未允许字段 ${field}: ${record.article_id ?? "(unknown)"}`);
+    }
+  }
   check(STATUS_ENUM.includes(record?.status), `index 记录 status 非法: ${record?.article_id} -> ${record?.status}`);
+  check(
+    isCanonicalArticlePath(record?.path, record?.article_id),
+    `index 记录 path 非 canonical（应为 content/articles/{year}/{article_id}/）: ${record?.article_id ?? "(unknown)"} -> ${record?.path}`
+  );
 }
 
 /* ---- 2. 扫描 content/articles/{year}/{article_id} 目录，验证全局唯一与 index 覆盖 ---- */
@@ -107,7 +166,7 @@ for (const record of articles) {
 /* ---- 3. 逐篇文章校验 ---- */
 for (const record of articles) {
   const articleId = record.article_id;
-  const dirPath = path.join(ROOT, record.path);
+  const dirPath = path.resolve(ROOT, record.path).replace(/\/+$/, "");
   const metaPath = path.join(dirPath, "meta.json");
 
   check(fs.existsSync(metaPath), `[${articleId}] path(${record.path}) 下缺少 meta.json`);
@@ -128,15 +187,20 @@ for (const record of articles) {
     check(field in meta, `[${articleId}] meta.json 缺少必填字段 ${field}`);
   }
   check(meta.article_id === articleId, `[${articleId}] meta.article_id(${meta.article_id}) 与 index 不一致`);
+  check(meta.title === record.title, `[${articleId}] index title(${record.title}) 与 meta title(${meta.title}) 不一致`);
   check(STATUS_ENUM.includes(meta.status), `[${articleId}] meta.status 非法: ${meta.status}`);
   check(meta.status === record.status, `[${articleId}] index status(${record.status}) 与 meta status(${meta.status}) 不一致`);
   check(meta.updated_at === record.updated_at, `[${articleId}] index updated_at(${record.updated_at}) 与 meta(${meta.updated_at}) 不一致`);
 
   for (const ref of ["source_file", "content_file", "assets_file"]) {
-    check(
-      typeof meta[ref] === "string" && fs.existsSync(path.join(dirPath, meta[ref])),
-      `[${articleId}] meta.${ref}(${meta[ref]}) 引用的文件不存在`
-    );
+    checkRefInside(dirPath, meta[ref], `meta.${ref}`, articleId);
+    if (typeof meta[ref] === "string" && meta[ref] !== "") {
+      const resolved = path.resolve(dirPath, meta[ref]);
+      check(
+        fs.existsSync(resolved),
+        `[${articleId}] meta.${ref}(${meta[ref]}) 引用的文件不存在`
+      );
+    }
   }
 
   let assets;
@@ -150,20 +214,33 @@ for (const record of articles) {
   check(assets.cover && typeof assets.cover === "object", `[${articleId}] assets.json 缺少 cover 对象`);
   check(Array.isArray(assets.body_images), `[${articleId}] assets.body_images 必须是数组`);
 
-  const requiredAssets = [assets?.cover].filter((item) => item && item.required === true);
-  for (const asset of requiredAssets) {
-    const assetPath = path.join(dirPath, asset.path);
-    if (meta.status === "ready_to_upload") {
-      check(fs.existsSync(assetPath), `[${articleId}] ready_to_upload 要求 required asset 实际存在: ${asset.path}`);
-    } else if (!fs.existsSync(assetPath)) {
-      warn(`[${articleId}] required asset 缺失（draft 状态允许）: ${asset.path}`);
-    }
-    if (fs.existsSync(assetPath)) {
+  /* cover Contract：required 必须显式为 true；path 语义必须先于存在性校验 */
+  const cover = assets.cover;
+  if (cover && typeof cover === "object") {
+    check(cover.required === true, `[${articleId}] assets.cover.required 必须为 true（当前: ${cover.required}）`);
+  }
+
+  const assetsDir = path.join(dirPath, "assets");
+  const requiredAssets = [];
+  if (cover && typeof cover === "object") {
+    const coverPath = cover.path;
+    check(typeof coverPath === "string" && coverPath !== "", `[${articleId}] assets.cover.path 必须是 non-empty string`);
+    if (typeof coverPath === "string" && coverPath !== "") {
+      check(!path.isAbsolute(coverPath), `[${articleId}] assets.cover.path(${coverPath}) 不得使用绝对路径`);
+      const coverResolved = path.resolve(dirPath, coverPath);
       check(
-        path.dirname(assetPath).startsWith(path.join(dirPath, "assets") + path.sep) ||
-          path.dirname(assetPath) === path.join(dirPath, "assets"),
-        `[${articleId}] ${asset.path} 必须位于 assets/ 内`
+        coverResolved.startsWith(assetsDir + path.sep),
+        `[${articleId}] assets.cover.path(${coverPath}) 必须位于 assets/ 内`
       );
+      requiredAssets.push({ path: coverPath, resolved: coverResolved });
+    }
+  }
+
+  for (const asset of requiredAssets) {
+    if (meta.status === "ready_to_upload") {
+      check(fs.existsSync(asset.resolved), `[${articleId}] ready_to_upload 要求 required asset 实际存在: ${asset.path}`);
+    } else if (!fs.existsSync(asset.resolved)) {
+      warn(`[${articleId}] required asset 缺失（draft 状态允许）: ${asset.path}`);
     }
   }
 }

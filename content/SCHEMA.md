@@ -137,7 +137,7 @@ MVP 结构：
 | `path` | 文章目录路径，**仓库根相对路径**（以 `content/articles/` 开头），以 `/` 结尾 |
 | `updated_at` | 与 meta.json 一致 |
 
-`index.json` 中的 `status` 与 `updated_at` 必须与该文章 `meta.json` 保持一致。
+`index.json` 中的 `article_id` / `title` / `status` / `updated_at` 必须与该文章 `meta.json` 保持一致。
 
 ## 8. schema_version
 
