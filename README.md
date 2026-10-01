@@ -1,329 +1,155 @@
 # WeChat Article Pilot
 
-飞书多维表格 × 微信公众号后台桥接工具。
+## 1. What It Is
 
-本项目把飞书多维表格作为文章内容和同步状态的操作台，通过后端中介层读取指定记录，并在后续阶段调用微信公众号 API 创建/更新草稿。
+在单一仓库中维护公众号 Article Package，由人授权具体内容版本，经 GitHub Actions 与 Publisher 送入微信公众号草稿箱。
+Canonical Repository：`LyraWang6688/wechat-article-pilot`。正式发布由 Lyra 人工完成。
+Agent 唯一当前入口：[AGENTS.md](AGENTS.md)；工程交接见 [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md)。
 
-当前阶段优先打通飞书侧：
-
-- 轻量前端配置页
-- 飞书 CLI 初始化和用户授权
-- 自动创建模板 Base 和推送草稿表
-- 自动生成并创建 Workflow
-- Workflow webhook 接收 `record_id`
-- 通过 `record_id` 读取一条 Base 记录的完整数据
-
-## 技术栈
-
-- 后端：Node.js + TypeScript + Express
-- 前端：静态 HTML + vanilla JS，由后端直接 serve
-- 飞书侧：`lark-cli` 子进程调用，优先使用用户身份授权
-- 微信侧：当前暂不接入，后续通过 HTTP API 调用公众号后台
-
-## 推荐开发方式
-
-当前推荐使用“服务器开发执行机”模式：
+## 2. Current Architecture
 
 ```text
-设备 A / B / C
-远程编辑服务器项目或访问测试页面
-        ↓
-/opt/wechat-article-pilot-dev
-服务器运行 Express 后端和 lark-cli
-        ↓
-飞书多维表格 / 飞书 Workflow
+content/articles/** → Content Validator → GitHub main
+→ publish-ready-articles.yml
+→ 检测 transition into ready_to_upload → exact authorized commit
+→ source_commit（canonical full 40-char lowercase Git SHA）
+→ POST /api/publisher/drafts
+→ Publisher 按 source_commit 从 GitHub 拉取 Article Package
+→ PublisherStateStore（idempotency / fail-closed）
+→ WechatService → 微信公众号 Draft
 ```
 
-这种方式可以避免每次小改动都经历“本地修改 -> push GitHub -> 服务器 pull -> Docker build -> 重启”的完整部署链路。代码、后端进程、`lark-cli` 配置和日志都集中在服务器，GitHub 只用于阶段性版本沉淀。
+工作流在 main 的内容 push 时运行，也支持 main 上的手动 dispatch；先校验 checkout HEAD，再扫描提交中的授权转换。最终 HEAD 必须仍为 `ready_to_upload`，并选取扫描范围内最后一次进入 ready 的提交。手动 dispatch 默认会调用 API，仅 `dry_run=true` 时不调用。
 
-服务器目录建议：
+当前 Express runtime（`src/app.ts`）只暴露 `GET /api/health` 与 `POST /api/publisher/drafts`；未挂载 Feishu、system、template、integration 路由，也不 serve `public/**`。其余路径返回 404。
+
+## 3. Article Lifecycle / State Ownership
 
 ```text
-/opt/wechat-article-pilot-dev
-开发测试目录，远程编辑这里，运行 npm run dev 或 PM2 dev 进程
-
-/opt/wechat-article-pilot-prod
-未来正式部署目录，后续再接 Docker / PM2 / Nginx
+Content / Human Authorization Domain: draft → ready_to_upload
+Publisher Delivery Domain: processing → uploaded_to_wechat
+                           或调用微信前失败记录 failed
 ```
 
-当前服务器测试入口：
+Content 只拥有 `draft` / `ready_to_upload`；Publisher 只拥有 `processing` / `uploaded_to_wechat` / `failed`。
+Publisher 不修改文章 `meta.json`，不回写 Content status；`GithubContentService` 当前为 read-only。
+微信阶段结果未知时保留 `processing`，不能把它当作可自动重试的 `failed`。
+
+## 4. Human Authorization Contract
+
+Human 把状态从 not-ready 转为 `ready_to_upload`，授权的是该 transition commit 对应的具体内容版本：
 
 ```text
-https://draft-api.bamamei.online -> http://127.0.0.1:3010
+Human Intent → status transition → authorized commit
+→ immutable source_commit → Publisher fetch exact version
 ```
 
-详细流程见：
+进入 ready 后的 later edit 不自动产生新的上传授权，也不会始终发布最新 HEAD。
 
-- [服务器远程开发流程](docs/REMOTE_SERVER_DEV.md)
-- [飞书 CLI 初始化与授权上下文](docs/LARK_CLI_INIT_CONTEXT.md)
+- `draft → ready(B) → ready(C)`：授权版本是 B。
+- `draft → ready(B) → draft(C) → ready(D)`：授权版本是 D。
 
-## 本地临时运行
+`ready_to_upload` 只授权送入微信草稿箱；不授权正式发布或群发。API 用 Bearer token 鉴权，授权提交的选择由 workflow 完成，Publisher 不独立重建 Git 历史授权链。
 
-```bash
-npm install
-npm run dev
-```
+## 5. Article Package
 
-打开：
+路径：`content/articles/{year}/{article_id}/`，article_id 为 `YYYY-MM-DD-<slug>`。
 
-```text
-http://localhost:3000
-```
+| 文件 | 当前用途 |
+| --- | --- |
+| `meta.json` | 元数据、Content status、文件引用 |
+| `source.md` | 源稿 |
+| `content.html` | 最终排版 HTML，交付资产，不得当垃圾清理 |
+| `assets.json` | 资产清单，交付资产 |
+| `assets/` 下 cover | `cover.path` 指向封面；Contract 要求 `cover.required=true` |
 
-本地临时运行适合单设备快速验证。跨设备开发和飞书 Workflow 联调时，优先使用服务器开发执行机。
+`content/index.json` 是低 token 索引，需与 meta 的 id/title/status/updated_at 一致。draft 可缺封面文件，ready 必须满足 required asset 存在性校验。完整内容约定见 [content/SCHEMA.md](content/SCHEMA.md)，内容操作见 [content/AI_HANDOFF.md](content/AI_HANDOFF.md)。
 
-如当前运行后端的机器上 `lark-cli` 不在 PATH，可复制 `.env.example` 为 `.env`，配置绝对路径：
+**KNOWN CONTRACT GAP（P1，未修复）**：Docs / Validator 支持 `meta.content_file`、`meta.assets_file` 引用；Publisher 固定读取 `content.html`、`assets.json`。Validator 当前校验 HEAD，Publisher 可能交付较早的 authorized commit。不得宣称两者已完全一致。
 
-```text
-LARK_CLI_BIN=C:\path\to\lark-cli.exe
-```
+### Brand Ownership
 
-如要让 webhook 只携带 `record_id`，可在 `.env` 中配置默认 Base 坐标：
+正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+[content/brand/one-page-wechat.md](content/brand/one-page-wechat.md) 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格与 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth，直接在本仓库维护，不建立外部 upstream 或同步副本关系。
 
-```text
-DEFAULT_BASE_TOKEN=bascnxxx
-DEFAULT_TABLE_ID=tblxxx
-```
+### Creative Layer / Publishing Runtime Boundary
 
-## 当前操作流程
+AI Content Creation 灵活、由 Human 驱动、非线性，可按需要组合标题、润色、事实核查、GEO、排版、封面与 Publish Check。创作遵循上述 Brand SSOT。
+`AI / Human flexible creation → Human Authorization Gate → deterministic Publishing Runtime`。
+Publishing Runtime 由 Contract 驱动并 fail-closed；创作能力不进入 GitHub Action → Publisher 主链。本阶段只定义边界，不实现 Skill Orchestration。
 
-1. 检查执行环境：确认当前后端运行在哪台机器、Node.js、`lark-cli` 和授权用户状态。
-2. 检查服务：确认 Express 后端可用。
-3. 检查 CLI：后端执行 `lark-cli --version`。
-4. 引导式配置初始化：后端执行 `lark-cli config init --new`。
-5. 用户授权：后端执行 `lark-cli auth login --scope <P0 必需权限> --no-wait --json`，授权 Base 创建、表创建、字段读取/创建/更新、视图写入、记录读写、Workflow 创建/启用所需权限。
-6. 完成授权：用户扫码/浏览器确认后，把 `device_code` 填回页面。
-7. 创建模板数据表：后端执行 `lark-cli base +base-create --table-name "推送草稿表" --fields <template_fields>`。
-8. 创建工作流：后端执行 `lark-cli base +workflow-create` 和 `+workflow-enable`。
-9. Workflow 触发：当新增或修改的记录满足 `status = ready_to_upload` 时，向后端 webhook 发送 `record_id`。
-10. 后端读取记录：执行 `lark-cli base +record-get --record-id <record_id> --format json`。
-11. 后端写回状态：执行 `lark-cli base +record-upsert`，成功写回 `uploaded_to_wechat`，失败写回 `failed`。
+## 6. Publisher API
 
-## 关于 config init --new
-
-`config init --new` 不是完全静默的一键操作，它更像飞书 CLI 的应用创建/绑定引导流程。页面上的“开始初始化”按钮只是触发后端执行 CLI，并把 CLI 输出展示给用户。
-
-如果 CLI 要求打开浏览器、创建应用、开权限或继续确认，需要用户按输出提示手动完成。后端不会承诺替用户完全自动创建和审批飞书应用。
-
-## 模板与 Workflow
-
-模板 Base 和推送草稿表已支持通过接口自动创建，字段结构已沉淀到文档：
-
-- [推送草稿表模板结构](docs/TEMPLATE_SCHEMA.md)
-- [Workflow 可行性依据](docs/WORKFLOW_FEASIBILITY.md)
-- [飞书初始化与授权后可用信息](docs/LARK_CLI_INIT_CONTEXT.md)
-- [项目说明书](PROJECT_BRIEF.md)
-
-推送草稿表触发规则：
-
-```text
-新增或修改的记录满足 status = ready_to_upload
-```
-
-写回规则：
-
-```text
-新增或修改的记录满足 status = uploaded_to_wechat / failed
-```
-
-当前 webhook：
-
-```text
-POST /api/webhooks/feishu/base-record-sync
-```
-
-请求体示例：
-
-```json
-{
-  "base_token": "bascnxxx",
-  "table_id": "tblxxx",
-  "record_id": "recxxx",
-  "event": "wechat_draft_sync"
-}
-```
-
-本地验证可选写回状态：
-
-```json
-{
-  "base_token": "bascnxxx",
-  "table_id": "tblxxx",
-  "record_id": "recxxx",
-  "writeBackStatus": "failed"
-}
-```
-
-## 已实现接口
-
-```text
-GET  /api/health
-GET  /api/system/env
-GET  /api/lark/shared/version
-POST /api/lark/shared/config/init
-POST /api/lark/shared/auth/login/start
-POST /api/lark/shared/auth/login/complete
-GET  /api/lark/shared/auth/status
-GET  /api/lark/shared/auth/current-user
-GET  /api/lark/shared/profiles
-POST /api/lark/base/resolve-url
-POST /api/lark/base/fields
-POST /api/lark/base/records
-POST /api/lark/base/records/get
-POST /api/lark/base/records/upsert
-POST /api/templates/wechat-draft/setup
-POST /api/templates/wechat-draft/workflows
-POST /api/templates/push-draft-table
-POST /api/webhooks/feishu/base-record-sync
-POST /api/publisher/drafts
-```
-
-## Publisher API（Single-Repo Content Workspace → 微信草稿）
-
-新增的 GitHub 链路入口，与飞书链路并存：
-
-```text
-canonical 仓库（wechat-article-pilot，Content Root: content/articles/）
-  -> GitHub Actions
-  -> POST /api/publisher/drafts
-  -> Publisher 自行拉取 meta.json / content.html / assets.json / cover
-  -> 微信永久图片素材上传 + 创建公众号图文草稿
-  -> 幂等状态持久化（article_id + source_commit）
-```
-
-请求体（调用方不得把完整 HTML 放进请求）：
+`POST /api/publisher/drafts`，请求头 `Authorization: Bearer <PUBLISHER_WEBHOOK_TOKEN>`。
 
 ```json
 {
   "repository": "LyraWang6688/wechat-article-pilot",
   "article_id": "2026-09-29-ai-tools",
   "ref": "main",
-  "source_commit": "<git commit sha>"
+  "source_commit": "b673a64e13cd8c0f80aee601809386f46c44e9ae"
 }
 ```
 
-成功响应：
+示例仅说明请求格式，不是发送指令，也不表示该 SHA 已授权该文章。请求不携带完整 HTML；`ref` 必填但读取版本由 `source_commit` 决定。仓库受 `PUBLISHER_ALLOWED_REPOSITORIES` 白名单限制。
+成功返回 `{ok:true,data}`，data 含 article_id、status=`uploaded_to_wechat`、source_commit、wechat_draft_media_id、uploaded_at、idempotent_replay；错误为 `{ok:false,error}`，含 message/code/retryable 等字段。
 
-```json
-{
-  "ok": true,
-  "data": {
-    "article_id": "2026-09-29-ai-tools",
-    "status": "uploaded_to_wechat",
-    "source_commit": "...",
-    "wechat_draft_media_id": "...",
-    "uploaded_at": "...",
-    "idempotent_replay": false
-  }
-}
-```
+## 7. Idempotency / Delivery Safety
 
-- **认证**：`Authorization: Bearer <PUBLISHER_WEBHOOK_TOKEN>`，未认证返回稳定 `401`。
-- **幂等**：键为 `article_id + source_commit`。重复调用返回上一次成功结果（`idempotent_replay = true`），不重复创建草稿；不可重试失败（如 `status != ready_to_upload`）会快速返回，GitHub 拉取等调用微信之前的失败按 `retryable` 标记允许重试。**并发保护**：同一幂等键的并发请求在单进程内合并，同时只允许一个微信草稿创建流程执行，后续请求等待并复用首个执行结果（不再调用微信）。**Fail-closed 保护**：第一次调用微信之前先持久化 `status = processing`（此 reserve 写入失败时尚未调用微信，返回可重试的 `500 STATE_SAVE_FAILED`，不锁定幂等键，下一次请求可安全重试）；微信阶段任何失败（或草稿已创建但成功状态未持久化）都会让状态停留在 processing——后续请求返回 `409 DELIVERY_OUTCOME_UNKNOWN`（`retryable = false`，不再调用微信），需人工确认草稿箱后再处理，绝不盲目重试制造重复草稿。**状态存储初始化**：首次访问创建唯一加载过程，并发调用共享等待同一初始化；状态文件读取/解析失败时持续 fail-closed（拒绝所有上传），不会退化为空状态继续运行，避免丢失幂等账本；**ledger integrity——不允许 partial recovery**：数组中任何一条记录语义无效（article_id/source_commit 非空、status 属于 processing/uploaded_to_wechat/failed、uploaded_at 非空、uploaded_to_wechat 必须含 wechat_draft_media_id），整个加载失败，绝不静默跳过损坏记录。
-- **白名单**：只允许读取配置好的 Content Repository（`PUBLISHER_ALLOWED_REPOSITORIES`，默认 canonical 仓库 `LyraWang6688/wechat-article-pilot`），其余仓库返回 `403 FORBIDDEN_REPOSITORY`，不信任 `request.repository`。
-- **校验**：`meta.schema_version = 1`、`meta.article_id` 与请求一致、`meta.status = ready_to_upload`、`title`、`content.html` 必须存在；`assets.schema_version = 1` 且 MVP 要求封面必需（`cover.required` 不可为 `false`、`cover.path` 指向的文件必须存在），否则返回稳定 Error Contract（含 `code` / `message` / `retryable`）。
-- **Secret 归属**：`WECHAT_APP_ID / WECHAT_APP_SECRET / GITHUB_CONTENT_TOKEN` 只存在于 Publisher 服务器端；GitHub Actions 只持有 `PUBLISHER_ENDPOINT + PUBLISHER_WEBHOOK_TOKEN`。
+这些是系统安全约束：
 
-新增环境变量（详见 `.env.example`）：
+- Idempotency Key：`article_id + source_commit`（内部以 `::` 连接）；SHA 必须严格匹配 `^[0-9a-f]{40}$`，不 trim、不接受分支名、短 SHA 或大写变体。
+- Ledger 默认 `.data/publisher-state.json`，分类 **DELIVERY_STATE**，不是 cache、build artifact 或 generated garbage；即使 gitignored，也禁止删除或清空以重试。
+- 第一次 WeChat side effect 前持久化 `processing`；reserve 失败返回可重试 `STATE_SAVE_FAILED`，尚未调用微信。
+- `uploaded_to_wechat` 可 idempotent replay；同键并发请求在单进程内合并。
+- 微信阶段失败或成功结果保存失败均属于 unknown outcome：保留 `processing`，返回不可重试 `409 DELIVERY_OUTCOME_UNKNOWN`，须人工确认，禁止自动重试。
+- corrupted ledger、duplicate idempotency key、invalid semantic record 全部 fail-closed；不允许 partial recovery 或静默去重。加载失败持续拒绝 find/save，不回退为空状态。
+- 写链串行化，以临时文件 + rename 替换快照，写盘成功后才更新 memory state。当前实现未调用 fsync，不应扩大为断电持久性保证。
+- 本地 ledger / in-flight 保护对应单进程模型；多副本共享存储与分布式锁尚未实现。
 
-```text
-GITHUB_CONTENT_TOKEN=      # Fine-grained PAT，仅 Content Repo，Contents Read-only
-WECHAT_APP_ID=             # 单公众号 MVP，服务器端微信凭证
-WECHAT_APP_SECRET=
-PUBLISHER_WEBHOOK_TOKEN=   # Publisher API 鉴权
-PUBLISHER_STATE_FILE=      # 幂等状态文件（默认 .data/publisher-state.json）
-PUBLISHER_ALLOWED_REPOSITORIES=LyraWang6688/wechat-article-pilot  # Content Repo 白名单（逗号分隔，默认 canonical 仓库）
-GITHUB_API_TIMEOUT_MS=30000
-```
+## 8. Environment Variables
 
-幂等状态默认写入 `.data/publisher-state.json`（已 gitignore），通过独立 `PublisherStateStore` 边界隔离，后续可替换为 SQLite / 数据库。
+当前 Publisher 服务必配凭证（只放服务端，不写入 Git 或日志）：
 
-一键创建模板 Base 和推送草稿表请求示例：
+| 变量 | 用途 / 默认值 |
+| --- | --- |
+| `GITHUB_CONTENT_TOKEN` | canonical 仓库 Contents Read-only token |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 单公众号凭证 |
+| `PUBLISHER_WEBHOOK_TOKEN` | API Bearer 鉴权 |
 
-```json
-{
-  "baseName": "公众号文章同步工作台",
-  "tableName": "推送草稿表"
-}
-```
+当前可配置变量：
 
-创建两条 Workflow 请求示例：
+| 变量 | 用途 / 默认值 |
+| --- | --- |
+| `PUBLISHER_STATE_FILE` | cwd 下 `.data/publisher-state.json` |
+| `PUBLISHER_ALLOWED_REPOSITORIES` | `LyraWang6688/wechat-article-pilot`，逗号分隔 |
+| `GITHUB_API_TIMEOUT_MS` | `30000` |
+| `WECHAT_API_TIMEOUT_MS` | `120000` |
+| `PORT` | 代码默认 `3000`，`.env.example` / PM2 dev 为 `3010` |
+| `LOG_LEVEL` | `info` |
 
-```json
-{
-  "baseToken": "bascnxxx",
-  "tableId": "tblxxx",
-  "tableName": "推送草稿表",
-  "webhookUrl": "https://draft-api.bamamei.online/api/webhooks/feishu/base-record-sync",
-  "enable": true
-}
-```
+Workflow Secrets：`PUBLISHER_ENDPOINT`（服务 base URL）与 `PUBLISHER_WEBHOOK_TOKEN`。微信和 GitHub 内容凭证不交给 workflow。
 
-服务器执行环境检查：
+Legacy-only：`LARK_CLI_BIN`、`LARK_CLI_TIMEOUT_MS`、`DEFAULT_BASE_TOKEN`、`DEFAULT_TABLE_ID`、`LOG_CLI_STDOUT`、`LOG_CLI_STDOUT_MAX_CHARS`、`LOG_CLI_STDERR_MAX_CHARS`；不是当前 Publisher 必需配置。参见 [.env.example](.env.example)。
 
-```text
-GET /api/system/env
-```
-
-用于查看当前后端主机、Node.js 版本、运行目录、`lark-cli` 可用性和当前飞书授权用户。
-
-## PM2 开发进程
-
-服务器开发期可用 PM2 避免 SSH 断开后进程退出：
+## 9. Validation / Tests
 
 ```bash
-npm install -g pm2
-npm run pm2:dev
-npm run pm2:dev:logs
+npm ci
+npm run typecheck
+npm test
+node scripts/validate-content.mjs
+git diff --check
 ```
 
-常用命令：
+这是本地结构与自动化验证，不证明真实微信 E2E 或线上部署。开发命令 `npm run dev`；编译 `npm run build`；运行编译结果 `npm start`。Node 版本需满足 lockfile 中依赖的 engines。
+PM2 配置仍为 `wechat-article-pilot-dev`、`/opt/wechat-article-pilot-dev`；本次 hygiene 不执行部署或重启。
 
-```bash
-npm run pm2:dev:restart
-npm run pm2:dev:stop
-pm2 status
-```
+## 10. Legacy Feishu Status
 
-默认 PM2 配置指向 `/opt/wechat-article-pilot-dev`。如果服务器目录不同，请修改 `ecosystem.config.cjs` 的 `cwd`。
+Feishu 已不是 Current Publishing Control Plane。Legacy Feishu Runtime Exposure 已关闭（runtime decommissioned）；残留 `public/**`、lark services、旧 routes/templates 等分类为 **LEGACY_IMPLEMENTATION**，不是 CURRENT_ARCHITECTURE。服务装配仍构造部分 legacy 对象，不代表路由仍可访问。
+Physical cleanup deferred until first real E2E approval；本阶段不物理删除。旧资料保留原文并加 HISTORICAL ONLY 标识，不作为当前运行或部署指南。
 
-## 日志与调试
+## 11. Experimental MCP Channel
 
-后端输出 JSON Lines 日志，便于在本地终端或服务器日志中检索。
-
-常用环境变量：
-
-```text
-LOG_LEVEL=info
-LOG_CLI_STDOUT=true
-LOG_CLI_STDOUT_MAX_CHARS=4000
-LOG_CLI_STDERR_MAX_CHARS=4000
-```
-
-关键事件：
-
-- `http_request_start` / `http_request_finish`：请求入口和响应耗时，包含 `traceId`。
-- `lark_cli_call_start`：实际执行的 `lark-cli` 命令和参数。
-- `lark_cli_call_success` / `lark_cli_call_failed`：CLI 出参、耗时、退出码、stdout/stderr 预览。
-- `template_push_draft_create_start`：创建「推送草稿表」的业务入参。
-- `feishu_webhook_base_record_sync_received`：飞书 Workflow 调后端 webhook 的原始输入。
-- `sync_article_fetch_record_start`：后端根据 `record_id` 读取 Base 记录。
-- `base_record_upsert_start`：状态写回 Base。
-
-日志会自动脱敏常见敏感字段，例如 `secret`、`token`、`authorization`、`cookie`、`device_code`、`baseToken`。
-
-## 安全注意
-
-- 飞书 `appSecret` 通过 `stdin` 传给 `lark-cli`，不拼接到命令行参数。
-- 微信 `AppSecret` 当前只做前端占位，尚未提交保存。
-- P0 阶段未接 Supabase，不做多用户配置持久化。
-- `.env` 不进入 Git，提交前请确认没有密钥、token、真实 AppSecret。
-
-## 下一步
-
-- 先完成飞书侧闭环：授权、Base 坐标、`record_id` webhook、完整记录读取、状态写回。
-- 开发阶段优先使用服务器开发执行机，稳定后再整理生产部署目录。
-- 模板表已支持通过 `+table-create` 创建；Workflow 自动创建后续再接。
-- Workflow JSON 模板后续基于真实字段 ID 和公网 webhook URL 生成。
-- 微信侧后续接入 `access_token`、永久素材、草稿新增和草稿更新。
-- 引入 Supabase 存储用户配置、授权状态、Base 坐标和微信配置。
+[PR #3](https://github.com/LyraWang6688/wechat-article-pilot/pull/3) 是 Experimental / Deferred Product Channel。2026-10-02 核验为 OPEN、未合并、未删除，不属于当前 main production path。本阶段不合并或删除它。

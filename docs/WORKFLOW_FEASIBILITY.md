@@ -1,3 +1,8 @@
+> **HISTORICAL ONLY — Legacy Feishu**
+> 本文保留旧 Feishu 架构时期的原始记录，不代表当前架构、待办或部署指令。
+> Feishu Runtime Exposure 已关闭；物理实现分类 LEGACY_IMPLEMENTATION，清理延后至 E2E 并获批准。
+> 当前唯一 Agent 入口为 [AGENTS.md](../AGENTS.md)，工程事实见 [Current Engineering Handoff](AI_HANDOFF.md)。
+
 # Workflow 可行性依据
 
 本文档说明为什么本项目需要的两个飞书多维表格 Workflow 可以通过 `lark-cli base +workflow-*` 实现。

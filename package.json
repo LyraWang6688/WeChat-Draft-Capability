@@ -1,9 +1,9 @@
 {
-  "name": "feishu-wechat-bridge",
+  "name": "wechat-article-pilot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Bridge Feishu Base records to WeChat Official Account drafts through lark-cli.",
+  "description": "Single-repo content workspace with human-authorized GitHub commits delivered through Publisher to WeChat drafts.",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",

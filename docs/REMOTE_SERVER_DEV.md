@@ -1,3 +1,8 @@
+> **HISTORICAL ONLY — Legacy Feishu**
+> 本文保留旧 Feishu 架构时期的原始记录，不代表当前架构、待办或部署指令。
+> Feishu Runtime Exposure 已关闭；物理实现分类 LEGACY_IMPLEMENTATION，清理延后至 E2E 并获批准。
+> 当前唯一 Agent 入口为 [AGENTS.md](../AGENTS.md)，工程事实见 [Current Engineering Handoff](AI_HANDOFF.md)。
+
 # 服务器远程开发流程
 
 本项目当前推荐把服务器作为“开发执行机”：代码、后端进程、`lark-cli` 配置和运行日志都集中在服务器上，设备 A / B / C 只负责远程编辑或访问页面。

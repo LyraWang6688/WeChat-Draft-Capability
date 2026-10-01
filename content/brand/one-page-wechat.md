@@ -6,8 +6,14 @@
 - 核心变化：从「AI Coding 产品落地」升级为「非技术背景知识工作者的 AI 协作实践」。
 - 不变战略：持续生成对 AI 搜索友好的文章，即 GEO / AI-Friendly Writing 方向保持不变。
 - 不变资产：品牌颜色体系、文章结构、排版规则、真实克制的文风保持不变。
-- 主维护仓库：`ai-native-content-lab`
+- 主维护仓库：`wechat-article-pilot`（`LyraWang6688/wechat-article-pilot`）
 - Skill 提炼仓库：`skill-library`
+
+## Brand Ownership
+
+正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+本文件 `content/brand/one-page-wechat.md` 是「要AI不释手」微信公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth。
+品牌规则直接在本仓库、本文件维护；不建立外部品牌 upstream 或同步副本关系，不另建 Brand SSOT。Skill 提炼不转移品牌所有权。
 
 ## 账号信息
 
@@ -279,6 +285,13 @@ AI 是很强大的工具，但工具本身不是答案。
 | 弱强调背景 | #E7ECE6 | 云雾绿 Cloud Sage | 用于金句/核心观点模块 |
 | 方法模块背景 | #F3F5F1 | 雪松白 Cedar White | 用于方法、步骤、清单类内容 |
 | 高亮文字色 | #66786B | 森林灰绿 Forest Sage | 用于小范围重点强调 |
+
+## 封面视觉原则
+
+- 克制、干净、有思考感，以低饱和视觉为主。
+- 优先真实工作场景、Workflow、产品系统与知识系统意象。
+- 避免夸张的“AI 魔法感”。
+- 避免高饱和科技蓝紫、霓虹感及无意义复杂渐变。
 
 ## 内容规范
 
