@@ -46,10 +46,7 @@ function defaultMeta() {
     author: "Lyra Wang",
     created_at: "2026-09-29",
     updated_at: "2026-09-29",
-    status: "ready_to_upload",
-    source_file: "source.md",
-    content_file: "content.html",
-    assets_file: "assets.json"
+    status: "ready_to_upload"
   };
 }
 

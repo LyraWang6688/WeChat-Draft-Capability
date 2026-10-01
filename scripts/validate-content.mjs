@@ -14,8 +14,8 @@
  *  4. index.path 必须为 canonical path（见 isCanonicalArticlePath）
  *  5. index 记录仅允许 Contract 定义字段（无 Unexpected Fields）
  *  6. index 与 meta 的 article_id / title / status / updated_at 一致
- *  7. meta 文件引用（source_file / content_file / assets_file）：
- *     non-empty string、相对路径、resolve 后位于当前 Article Package 内、文件存在
+ *  7. Article Package 固定文件名（Contract v1 frozen）：source.md / content.html /
+ *     assets.json 必须为 regular file（meta.json 固定存在，见逐篇校验）
  *  8. assets.cover.required 必须显式为 true（false 即 Contract violation）
  *  9. assets.cover.path：non-empty string、相对路径、resolve 后位于 assets/ 内
  *     （路径 Contract 非法即使 draft 也 FAIL；draft 只豁免"文件缺失"）
@@ -44,6 +44,11 @@ const STATUS_ENUM = ["draft", "ready_to_upload"];
 const SCHEMA_VERSION = 1;
 const INDEX_RECORD_FIELDS = ["article_id", "title", "status", "path", "updated_at"];
 const ALLOWED_INDEX_FIELDS = new Set(INDEX_RECORD_FIELDS);
+const SOURCE_FILE_NAME = "source.md";
+const CONTENT_FILE_NAME = "content.html";
+const ASSETS_FILE_NAME = "assets.json";
+const PACKAGE_FILE_NAMES = [SOURCE_FILE_NAME, CONTENT_FILE_NAME, ASSETS_FILE_NAME];
+
 const META_REQUIRED_FIELDS = [
   "schema_version",
   "article_id",
@@ -51,10 +56,7 @@ const META_REQUIRED_FIELDS = [
   "author",
   "created_at",
   "updated_at",
-  "status",
-  "source_file",
-  "content_file",
-  "assets_file"
+  "status"
 ];
 const META_STRING_FIELDS = [
   "article_id",
@@ -62,10 +64,7 @@ const META_STRING_FIELDS = [
   "author",
   "created_at",
   "updated_at",
-  "status",
-  "source_file",
-  "content_file",
-  "assets_file"
+  "status"
 ];
 const META_ALLOWED_FIELDS = new Set([...META_REQUIRED_FIELDS, "digest", "column"]);
 
@@ -123,23 +122,6 @@ function isCanonicalArticlePath(p, articleId) {
   if (dirId !== articleId) return false;
   if (year !== articleId.slice(0, 4)) return false;
   return true;
-}
-
-/**
- * 校验文件引用路径的边界：
- * - 必须是 non-empty string
- * - 不得为绝对路径
- * - resolve 后必须仍位于 baseDir 之内（不允许 ../ escape）
- */
-function checkRefInside(baseDir, ref, label, articleId) {
-  check(typeof ref === "string" && ref !== "", `[${articleId}] ${label} 必须是 non-empty string`);
-  if (typeof ref !== "string" || ref === "") return;
-  check(!path.isAbsolute(ref), `[${articleId}] ${label}(${ref}) 不得使用绝对路径`);
-  const resolved = path.resolve(baseDir, ref);
-  check(
-    resolved.startsWith(baseDir + path.sep),
-    `[${articleId}] ${label}(${ref}) 不得 escape 所属目录`
-  );
 }
 
 /* ---- 0. Content Workspace 存在性 ---- */
@@ -269,23 +251,19 @@ for (const record of articles) {
   check(meta.status === record.status, `[${articleId}] index status(${record.status}) 与 meta status(${meta.status}) 不一致`);
   check(meta.updated_at === record.updated_at, `[${articleId}] index updated_at(${record.updated_at}) 与 meta(${meta.updated_at}) 不一致`);
 
-  for (const ref of ["source_file", "content_file", "assets_file"]) {
-    checkRefInside(dirPath, meta[ref], `meta.${ref}`, articleId);
-    if (typeof meta[ref] === "string" && meta[ref] !== "") {
-      const resolved = path.resolve(dirPath, meta[ref]);
-      let st = null;
-      try {
-        st = fs.statSync(resolved);
-      } catch {
-        /* 文件缺失 */
-      }
-      check(st && st.isFile(), `[${articleId}] meta.${ref}(${meta[ref]}) 必须是 regular file`);
-    }
-  }
-  if (meta.status === "ready_to_upload" && typeof meta.content_file === "string" && meta.content_file.trim() !== "") {
-    const contentResolved = path.resolve(dirPath, meta.content_file);
+  // Article Contract v1 (frozen)：交付文件名固定，不支持 meta 动态配置。
+  for (const fileName of PACKAGE_FILE_NAMES) {
+    let st = null;
     try {
-      const content = fs.readFileSync(contentResolved, "utf8");
+      st = fs.statSync(path.join(dirPath, fileName));
+    } catch {
+      /* 文件缺失 */
+    }
+    check(st && st.isFile(), `[${articleId}] 缺少固定 Contract 文件 ${fileName}（必须为 regular file）`);
+  }
+  if (meta.status === "ready_to_upload") {
+    try {
+      const content = fs.readFileSync(path.join(dirPath, CONTENT_FILE_NAME), "utf8");
       check(content.trim() !== "", `[${articleId}] ready_to_upload 要求 content.html 有实际内容`);
     } catch {
       /* regular-file 检查已覆盖缺失情况 */
@@ -294,7 +272,7 @@ for (const record of articles) {
 
   let assets;
   try {
-    assets = JSON.parse(fs.readFileSync(path.join(dirPath, meta.assets_file), "utf8"));
+    assets = JSON.parse(fs.readFileSync(path.join(dirPath, ASSETS_FILE_NAME), "utf8"));
   } catch (error) {
     check(false, `[${articleId}] assets.json 不是合法 JSON: ${error.message}`);
     continue;
