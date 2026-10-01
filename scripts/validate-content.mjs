@@ -56,6 +56,17 @@ const META_REQUIRED_FIELDS = [
   "content_file",
   "assets_file"
 ];
+const META_STRING_FIELDS = [
+  "article_id",
+  "title",
+  "author",
+  "created_at",
+  "updated_at",
+  "status",
+  "source_file",
+  "content_file",
+  "assets_file"
+];
 
 const errors = [];
 const warnings = [];
@@ -63,6 +74,18 @@ const check = (cond, msg) => {
   if (!cond) errors.push(msg);
 };
 const warn = (msg) => warnings.push(msg);
+
+/**
+ * 校验日期字符串是否为有效 YYYY-MM-DD 日历日期。
+ * 使用 UTC 构造 Date 并反向核对 components，杜绝 2026-02-30 / 2026-13-99 这类非法日期。
+ */
+function isValidDateStr(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  if (y < 1 || m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
 
 /**
  * 校验 index 记录 path 是否为 canonical：
@@ -140,6 +163,26 @@ for (const record of articles) {
     isCanonicalArticlePath(record?.path, record?.article_id),
     `index 记录 path 非 canonical（应为 content/articles/{year}/{article_id}/）: ${record?.article_id ?? "(unknown)"} -> ${record?.path}`
   );
+  check(
+    typeof record?.article_id === "string" && record.article_id !== "",
+    `index 记录 article_id 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
+  );
+  check(
+    typeof record?.title === "string" && record.title !== "",
+    `index 记录 title 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
+  );
+  check(
+    typeof record?.status === "string" && record.status !== "",
+    `index 记录 status 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
+  );
+  check(
+    typeof record?.path === "string" && record.path !== "",
+    `index 记录 path 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
+  );
+  check(
+    isValidDateStr(record?.updated_at),
+    `index 记录 updated_at(${record?.updated_at}) 必须是有效 YYYY-MM-DD: ${record?.article_id ?? "(unknown)"}`
+  );
 }
 
 /* ---- 2. 扫描 content/articles/{year}/{article_id} 目录，验证全局唯一与 index 覆盖 ---- */
@@ -182,10 +225,21 @@ for (const record of articles) {
     continue;
   }
 
-  check(meta.schema_version === SCHEMA_VERSION, `[${articleId}] meta.schema_version 必须为 1`);
+  check(
+    typeof meta.schema_version === "number" && meta.schema_version === SCHEMA_VERSION,
+    `[${articleId}] meta.schema_version 必须是 number 且为 1`
+  );
   for (const field of META_REQUIRED_FIELDS) {
     check(field in meta, `[${articleId}] meta.json 缺少必填字段 ${field}`);
   }
+  for (const field of META_STRING_FIELDS) {
+    check(
+      typeof meta[field] === "string" && meta[field] !== "",
+      `[${articleId}] meta.${field} 必须是 non-empty string`
+    );
+  }
+  check(isValidDateStr(meta.created_at), `[${articleId}] meta.created_at(${meta.created_at}) 必须是有效 YYYY-MM-DD`);
+  check(isValidDateStr(meta.updated_at), `[${articleId}] meta.updated_at(${meta.updated_at}) 必须是有效 YYYY-MM-DD`);
   check(meta.article_id === articleId, `[${articleId}] meta.article_id(${meta.article_id}) 与 index 不一致`);
   check(meta.title === record.title, `[${articleId}] index title(${record.title}) 与 meta title(${meta.title}) 不一致`);
   check(STATUS_ENUM.includes(meta.status), `[${articleId}] meta.status 非法: ${meta.status}`);
