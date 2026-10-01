@@ -544,7 +544,7 @@ describe("POST /api/publisher/drafts", () => {
         [
           {
             article_id: "2026-09-29-other-topic",
-            source_commit: "othercommit123",
+            source_commit: "0123456789abcdef0123456789abcdef01234568",
             status: "uploaded_to_wechat",
             wechat_draft_media_id: "other_draft_1",
             uploaded_at: "2026-09-29T00:00:00.000Z"
@@ -774,5 +774,80 @@ describe("POST /api/publisher/drafts", () => {
     expect(finalContent).toHaveLength(1);
     expect(finalContent[0]?.status).toBe("uploaded_to_wechat");
     expect(finalContent[0]?.wechat_draft_media_id).toBe("draft_test_1");
+  });
+
+  it("25. Ledger source_commit 非 canonical（short / main / uppercase / whitespace）：整体 fail-closed", async () => {
+    await bootApp(buildFiles());
+    const invalidLedgerCommits = [
+      "abc123def456", // short SHA
+      "main", // mutable ref
+      "0123456789ABCDEF0123456789ABCDEF01234567", // uppercase 40-char
+      " 0123456789abcdef0123456789abcdef01234567" // whitespace-padded
+    ];
+    for (const bad of invalidLedgerCommits) {
+      const statePath = path.join(stateDir, "publisher-state.json");
+      writeFileSync(
+        statePath,
+        JSON.stringify(
+          [
+            {
+              article_id: ARTICLE_ID,
+              source_commit: bad,
+              status: "failed",
+              retryable: false,
+              error_code: "ARTICLE_NOT_READY",
+              uploaded_at: "2026-09-29T00:00:00.000Z"
+            }
+          ],
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      // 首次访问即 fail-closed
+      const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+      expect(first.status).toBe(500);
+      const firstBody = (await first.json()) as { error: { code: string } };
+      expect(firstBody.error.code).toBe("INTERNAL_ERROR");
+
+      // 后续 find/save 继续 fail-closed（loadPromise 保持 rejected）
+      const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+      expect(second.status).toBe(500);
+
+      // 不触发任何 GitHub / 微信调用
+      expect(githubCalls).toHaveLength(0);
+      expect(wechatCalls).toHaveLength(0);
+    }
+  });
+
+  it("26. Ledger source_commit 合法 lowercase 40-char SHA：正常 load 且幂等生效", async () => {
+    await bootApp(buildFiles());
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: SOURCE_COMMIT,
+            status: "uploaded_to_wechat",
+            wechat_draft_media_id: "draft_test_1",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { idempotent_replay: boolean } };
+    // 合法 canonical 记录被正确加载，直接幂等回放，不重调微信
+    expect(body.data.idempotent_replay).toBe(true);
+    expect(wechatCalls).toHaveLength(0);
+    expect(githubCalls).toHaveLength(0);
   });
 });

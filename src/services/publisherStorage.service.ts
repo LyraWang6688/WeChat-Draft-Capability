@@ -4,6 +4,9 @@ import { logger } from "../utils/logger.js";
 
 export type PublisherUploadStatus = "processing" | "uploaded_to_wechat" | "failed";
 
+/** Ledger 中 source_commit 必须与 Request Contract 一致：canonical 40 位小写 hex SHA。 */
+const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+
 export type PublisherUploadState = {
   article_id: string;
   source_commit: string;
@@ -135,6 +138,14 @@ function validateStateRecord(value: unknown): PublisherUploadState {
   }
   if (typeof record.source_commit !== "string" || !record.source_commit.trim()) {
     throw new Error("publisher state record: source_commit must be a non-empty string");
+  }
+  // Persisted Ledger 同样是 Idempotency Contract 的一部分：
+  // source_commit 必须与 Request Contract 一致，是 canonical 40 位小写 hex SHA。
+  // 拒绝 main / HEAD / short SHA / uppercase / whitespace —— 不做 trim / 大小写归一 /
+  // 自动补全 / 自动转换；出现 noncanonical source_commit 即整体 fail-closed，
+  // 防止「同一 commit 因表达不同形成不同幂等键」绕过已有上传记录。
+  if (!SOURCE_COMMIT_PATTERN.test(record.source_commit)) {
+    throw new Error("publisher state record: source_commit must be a canonical 40-char lowercase hex SHA");
   }
   if (
     record.status !== "processing" &&
