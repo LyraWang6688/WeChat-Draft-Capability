@@ -67,6 +67,7 @@ const META_STRING_FIELDS = [
   "content_file",
   "assets_file"
 ];
+const META_ALLOWED_FIELDS = new Set([...META_REQUIRED_FIELDS, "digest", "column"]);
 
 const errors = [];
 const warnings = [];
@@ -85,6 +86,17 @@ function isValidDateStr(s) {
   if (y < 1 || m < 1 || m > 12 || d < 1 || d > 31) return false;
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * 校验 article_id 是否满足 Publisher 兼容格式：
+ *   YYYY-MM-DD-<slug>，且 YYYY-MM-DD 为有效日历日期。
+ * 例如：2026-topic FAIL；2026-13-99-test FAIL；2026-09-29-ai-tools PASS。
+ */
+function isValidArticleId(id) {
+  if (typeof id !== "string" || id === "") return false;
+  if (!/^\d{4}-\d{2}-\d{2}-.+/.test(id)) return false;
+  return isValidDateStr(id.slice(0, 10));
 }
 
 /**
@@ -144,10 +156,11 @@ if (fs.existsSync(INDEX_PATH)) {
     check(false, `content/index.json 不是合法 JSON: ${error.message}`);
   }
 }
+check(indexData?.schema_version === SCHEMA_VERSION, "index.json schema_version 必须为 1");
+check(Array.isArray(indexData?.articles), "index.json articles 必须是数组");
 const articles = Array.isArray(indexData?.articles) ? indexData.articles : [];
 const articleIds = articles.map((item) => item?.article_id).filter(Boolean);
 
-check(indexData?.schema_version === SCHEMA_VERSION, "index.json schema_version 必须为 1");
 check(new Set(articleIds).size === articleIds.length, "index.json 中存在重复 article_id");
 for (const record of articles) {
   for (const field of INDEX_RECORD_FIELDS) {
@@ -164,19 +177,23 @@ for (const record of articles) {
     `index 记录 path 非 canonical（应为 content/articles/{year}/{article_id}/）: ${record?.article_id ?? "(unknown)"} -> ${record?.path}`
   );
   check(
-    typeof record?.article_id === "string" && record.article_id !== "",
+    typeof record?.article_id === "string" && record.article_id.trim() !== "",
     `index 记录 article_id 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
   );
   check(
-    typeof record?.title === "string" && record.title !== "",
+    isValidArticleId(record?.article_id),
+    `index 记录 article_id 必须符合 YYYY-MM-DD-<slug> 且日期有效: ${record?.article_id ?? "(unknown)"}`
+  );
+  check(
+    typeof record?.title === "string" && record.title.trim() !== "",
     `index 记录 title 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
   );
   check(
-    typeof record?.status === "string" && record.status !== "",
+    typeof record?.status === "string" && record.status.trim() !== "",
     `index 记录 status 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
   );
   check(
-    typeof record?.path === "string" && record.path !== "",
+    typeof record?.path === "string" && record.path.trim() !== "",
     `index 记录 path 必须是 non-empty string: ${record?.article_id ?? "(unknown)"}`
   );
   check(
@@ -234,13 +251,19 @@ for (const record of articles) {
   }
   for (const field of META_STRING_FIELDS) {
     check(
-      typeof meta[field] === "string" && meta[field] !== "",
+      typeof meta[field] === "string" && meta[field].trim() !== "",
       `[${articleId}] meta.${field} 必须是 non-empty string`
     );
+  }
+  if (meta && typeof meta === "object") {
+    for (const field of Object.keys(meta)) {
+      check(META_ALLOWED_FIELDS.has(field), `[${articleId}] meta.json 包含未允许字段 ${field}`);
+    }
   }
   check(isValidDateStr(meta.created_at), `[${articleId}] meta.created_at(${meta.created_at}) 必须是有效 YYYY-MM-DD`);
   check(isValidDateStr(meta.updated_at), `[${articleId}] meta.updated_at(${meta.updated_at}) 必须是有效 YYYY-MM-DD`);
   check(meta.article_id === articleId, `[${articleId}] meta.article_id(${meta.article_id}) 与 index 不一致`);
+  check(isValidArticleId(meta.article_id), `[${articleId}] meta.article_id 必须符合 YYYY-MM-DD-<slug> 且日期有效`);
   check(meta.title === record.title, `[${articleId}] index title(${record.title}) 与 meta title(${meta.title}) 不一致`);
   check(STATUS_ENUM.includes(meta.status), `[${articleId}] meta.status 非法: ${meta.status}`);
   check(meta.status === record.status, `[${articleId}] index status(${record.status}) 与 meta status(${meta.status}) 不一致`);
@@ -250,10 +273,22 @@ for (const record of articles) {
     checkRefInside(dirPath, meta[ref], `meta.${ref}`, articleId);
     if (typeof meta[ref] === "string" && meta[ref] !== "") {
       const resolved = path.resolve(dirPath, meta[ref]);
-      check(
-        fs.existsSync(resolved),
-        `[${articleId}] meta.${ref}(${meta[ref]}) 引用的文件不存在`
-      );
+      let st = null;
+      try {
+        st = fs.statSync(resolved);
+      } catch {
+        /* 文件缺失 */
+      }
+      check(st && st.isFile(), `[${articleId}] meta.${ref}(${meta[ref]}) 必须是 regular file`);
+    }
+  }
+  if (meta.status === "ready_to_upload" && typeof meta.content_file === "string" && meta.content_file.trim() !== "") {
+    const contentResolved = path.resolve(dirPath, meta.content_file);
+    try {
+      const content = fs.readFileSync(contentResolved, "utf8");
+      check(content.trim() !== "", `[${articleId}] ready_to_upload 要求 content.html 有实际内容`);
+    } catch {
+      /* regular-file 检查已覆盖缺失情况 */
     }
   }
 
@@ -292,7 +327,13 @@ for (const record of articles) {
 
   for (const asset of requiredAssets) {
     if (meta.status === "ready_to_upload") {
-      check(fs.existsSync(asset.resolved), `[${articleId}] ready_to_upload 要求 required asset 实际存在: ${asset.path}`);
+      let st = null;
+      try {
+        st = fs.statSync(asset.resolved);
+      } catch {
+        /* 文件缺失 */
+      }
+      check(st && st.isFile(), `[${articleId}] ready_to_upload 要求 required asset 是 regular file 且实际存在: ${asset.path}`);
     } else if (!fs.existsSync(asset.resolved)) {
       warn(`[${articleId}] required asset 缺失（draft 状态允许）: ${asset.path}`);
     }

@@ -27,7 +27,7 @@ content/
 ## 2. article_id
 
 - **全局唯一**，不得与其他文章重复。
-- 建议格式：`YYYY-MM-DD-<slug>`，例如 `2026-09-29-ai-tools`。
+- **必须**符合格式 `YYYY-MM-DD-<slug>`（Publisher 兼容格式），例如 `2026-09-29-ai-tools`；其中 `YYYY-MM-DD` 必须是有效日历日期。
 - `year` 必须与 `article_id` 中的年份一致，且目录路径必须与 `article_id` 匹配。
 
 ## 3. meta.json
