@@ -4,6 +4,9 @@ import { logger } from "../utils/logger.js";
 
 export type PublisherUploadStatus = "processing" | "uploaded_to_wechat" | "failed";
 
+/** Ledger 中 source_commit 必须与 Request Contract 一致：canonical 40 位小写 hex SHA。 */
+const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+
 export type PublisherUploadState = {
   article_id: string;
   source_commit: string;
@@ -72,7 +75,14 @@ export class FilePublisherStateStore implements PublisherStateStore {
       const loaded = new Map<string, PublisherUploadState>();
       parsed.forEach((item) => {
         const state = validateStateRecord(item);
-        loaded.set(stateKey(state.article_id, state.source_commit), state);
+        const key = stateKey(state.article_id, state.source_commit);
+        // 不允许 duplicate key：同一 article_id + source_commit 出现两条记录时，
+        // 幂等账本语义已歧义（哪条才是真相未知），绝不 last-write-wins / first-write-wins /
+        // 自动去重——整个加载 fail-closed，必须人工处理，防止歧义导致重复创建微信草稿。
+        if (loaded.has(key)) {
+          throw new Error(`publisher state record: duplicate idempotency key "${key}"`);
+        }
+        loaded.set(key, state);
       });
       this.states = loaded;
     } catch (error) {
@@ -128,6 +138,14 @@ function validateStateRecord(value: unknown): PublisherUploadState {
   }
   if (typeof record.source_commit !== "string" || !record.source_commit.trim()) {
     throw new Error("publisher state record: source_commit must be a non-empty string");
+  }
+  // Persisted Ledger 同样是 Idempotency Contract 的一部分：
+  // source_commit 必须与 Request Contract 一致，是 canonical 40 位小写 hex SHA。
+  // 拒绝 main / HEAD / short SHA / uppercase / whitespace —— 不做 trim / 大小写归一 /
+  // 自动补全 / 自动转换；出现 noncanonical source_commit 即整体 fail-closed，
+  // 防止「同一 commit 因表达不同形成不同幂等键」绕过已有上传记录。
+  if (!SOURCE_COMMIT_PATTERN.test(record.source_commit)) {
+    throw new Error("publisher state record: source_commit must be a canonical 40-char lowercase hex SHA");
   }
   if (
     record.status !== "processing" &&

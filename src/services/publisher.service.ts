@@ -42,6 +42,9 @@ type FailureInfo = {
 const READY_TO_UPLOAD = "ready_to_upload";
 const VALIDATION_STATUS_CODE = 422;
 
+/** source_commit 必须是 canonical full Git commit SHA：40 位小写 hexadecimal。 */
+const SOURCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+
 /**
  * Publisher Domain 编排服务（GitHub Content Hub -> 微信公众号草稿箱）。
  *
@@ -348,6 +351,13 @@ function validateRequest(input: PublisherDraftRequest) {
   }
   if (typeof input.source_commit !== "string" || !input.source_commit.trim()) {
     throw new HttpError(400, "缺少 source_commit", "INVALID_REQUEST", undefined, false);
+  }
+  // source_commit 是 Immutable Version Identity：必须是 canonical 40 位小写 hex SHA。
+  // 拒绝 main / refs/heads/* / short SHA / 非 hex / 大小写变体 / 前后空白——避免 mutable ref
+  // 或 noncanonical 表达造成幂等键歧义（同一个 commit 因表达不同形成不同 key）。
+  // 直接对原始值做全量匹配（^[0-9a-f]{40}$ 天然不允许任何空白），不做 trim 后放行。
+  if (!SOURCE_COMMIT_PATTERN.test(input.source_commit)) {
+    throw new HttpError(400, "source_commit 必须是 40 位小写十六进制 Git commit SHA", "INVALID_REQUEST", undefined, false);
   }
 }
 
