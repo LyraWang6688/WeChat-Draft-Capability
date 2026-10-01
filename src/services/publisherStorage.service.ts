@@ -72,7 +72,14 @@ export class FilePublisherStateStore implements PublisherStateStore {
       const loaded = new Map<string, PublisherUploadState>();
       parsed.forEach((item) => {
         const state = validateStateRecord(item);
-        loaded.set(stateKey(state.article_id, state.source_commit), state);
+        const key = stateKey(state.article_id, state.source_commit);
+        // 不允许 duplicate key：同一 article_id + source_commit 出现两条记录时，
+        // 幂等账本语义已歧义（哪条才是真相未知），绝不 last-write-wins / first-write-wins /
+        // 自动去重——整个加载 fail-closed，必须人工处理，防止歧义导致重复创建微信草稿。
+        if (loaded.has(key)) {
+          throw new Error(`publisher state record: duplicate idempotency key "${key}"`);
+        }
+        loaded.set(key, state);
       });
       this.states = loaded;
     } catch (error) {

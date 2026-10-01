@@ -13,7 +13,7 @@ const WECHAT_APP_SECRET = "wx_test_secret_123456";
 const WECHAT_ACCESS_TOKEN = "wechat_access_token_test";
 
 const ARTICLE_ID = "2026-09-29-ai-tools";
-const SOURCE_COMMIT = "abc123def456";
+const SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const REPOSITORY = "LyraWang6688/wechat-article-pilot";
 const BASE = `content/articles/2026/${ARTICLE_ID}`;
 
@@ -664,5 +664,115 @@ describe("POST /api/publisher/drafts", () => {
     const metaRequest = newRootRequests.find((url) => url.includes("/meta.json"));
     expect(metaRequest).toBeTruthy();
     expect(metaRequest).toContain(`?ref=${SOURCE_COMMIT}`);
+  });
+
+  it("21. source_commit 必须是 40 位小写 hex SHA：非法值全部返回稳定 400 且不触发上游", async () => {
+    await bootApp(buildFiles());
+    const invalidSourceCommits = [
+      "main", // mutable ref
+      "refs/heads/main", // ref 表达
+      "abc123def456", // short SHA
+      "0123456789abcdef0123456789abcdef0123456g", // 含非 hex 字符
+      "0123456789abcdef0123456789abcdef0123456", // 39 位
+      "0123456789abcdef0123456789abcdef012345678", // 41 位
+      "0123456789ABCDEF0123456789ABCDEF01234567", // uppercase（非 canonical lowercase）
+      "", // empty
+      " 0123456789abcdef0123456789abcdef01234567" // 带前导空格
+    ];
+    for (const invalid of invalidSourceCommits) {
+      const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`, {
+        ...requestBody(),
+        source_commit: invalid
+      });
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: { code: string; retryable: boolean } };
+      expect(body.error.code).toBe("INVALID_REQUEST");
+      expect(body.error.retryable).toBe(false);
+    }
+    // 非法输入一律在请求验证阶段被拒绝，不触发任何 GitHub / 微信调用
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
+  });
+
+  it("22. Ledger 相同 key 状态冲突（uploaded_to_wechat vs failed）：整体 fail-closed，绝不重调微信", async () => {
+    await bootApp(buildFiles());
+    const statePath = path.join(stateDir, "publisher-state.json");
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        [
+          {
+            article_id: ARTICLE_ID,
+            source_commit: SOURCE_COMMIT,
+            status: "uploaded_to_wechat",
+            wechat_draft_media_id: "draft_test_1",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          },
+          {
+            article_id: ARTICLE_ID,
+            source_commit: SOURCE_COMMIT,
+            status: "failed",
+            retryable: true,
+            error_code: "WECHAT_UPSTREAM_ERROR",
+            uploaded_at: "2026-09-29T00:00:00.000Z"
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    // 首次访问即 fail-closed：不得用 retryable failed 覆盖已上传记录后重试
+    const first = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(first.status).toBe(500);
+    const firstBody = (await first.json()) as { error: { code: string } };
+    expect(firstBody.error.code).toBe("INTERNAL_ERROR");
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
+
+    // 第二次仍然失败：loadPromise 保持 rejected，不允许退化为空状态继续运行
+    const second = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(second.status).toBe(500);
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
+  });
+
+  it("23. Ledger 两条完全相同 key 的记录：整体 fail-closed，不允许静默去重", async () => {
+    await bootApp(buildFiles());
+    const statePath = path.join(stateDir, "publisher-state.json");
+    const record = {
+      article_id: ARTICLE_ID,
+      source_commit: SOURCE_COMMIT,
+      status: "failed",
+      retryable: false,
+      error_code: "ARTICLE_NOT_READY",
+      uploaded_at: "2026-09-29T00:00:00.000Z"
+    };
+    writeFileSync(statePath, JSON.stringify([record, record], null, 2), "utf8");
+
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    // 不调用 GitHub / 微信：重复 key 视为账本歧义，而不是可重试业务失败
+    expect(githubCalls).toHaveLength(0);
+    expect(wechatCalls).toHaveLength(0);
+  });
+
+  it("24. 正常 save 后的 snapshot 不产生重复 idempotency key", async () => {
+    await bootApp(buildFiles());
+    const response = await postDraft(`Bearer ${WEBHOOK_TOKEN}`);
+    expect(response.status).toBe(200);
+
+    const statePath = path.join(stateDir, "publisher-state.json");
+    const finalContent = JSON.parse(readFileSync(statePath, "utf8")) as Array<Record<string, unknown>>;
+    const keys = finalContent.map((item) => `${item.article_id}::${item.source_commit}`);
+    expect(new Set(keys).size).toBe(keys.length);
+
+    // 成功记录存在且只有一条
+    expect(finalContent).toHaveLength(1);
+    expect(finalContent[0]?.status).toBe("uploaded_to_wechat");
+    expect(finalContent[0]?.wechat_draft_media_id).toBe("draft_test_1");
   });
 });
