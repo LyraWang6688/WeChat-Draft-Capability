@@ -81,24 +81,17 @@ jobs:
           fi
 
           # Auto-publish ONLY on a status transition INTO ready_to_upload
-          # (e.g. draft -> ready_to_upload). An article that is already
+          # (e.g. draft -> ready_to_upload), and BIND the request to the exact
+          # commit that performed the transition: the human authorized a
+          # specific immutable content version, so source_commit must be that
+          # commit, not the overall push HEAD. An article that is already
           # ready_to_upload must NOT be re-uploaded when only its content
           # (source.md / content.html / assets) changes in a later commit.
           TRANSITION_DIRS=""
           while IFS= read -r dir; do
             [[ -z "$dir" ]] && continue
 
-            if [[ -z "$BASE_SHA" || "$BASE_SHA" == "$ZERO_SHA" ]]; then
-              base_status="<none>"
-            else
-              base_meta="$(git show "$BASE_SHA:$dir/meta.json" 2>/dev/null || true)"
-              if [[ -n "$base_meta" ]]; then
-                base_status="$(printf '%s\n' "$base_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
-              else
-                base_status="<none>"
-              fi
-            fi
-
+            # Final (HEAD) status gates whether the article is authorized at all.
             head_meta="$(git show "$HEAD_SHA:$dir/meta.json" 2>/dev/null || true)"
             if [[ -n "$head_meta" ]]; then
               head_status="$(printf '%s\n' "$head_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
@@ -106,11 +99,50 @@ jobs:
               head_status="<none>"
             fi
 
-            if [[ "$head_status" == "ready_to_upload" && "$base_status" != "ready_to_upload" ]]; then
-              TRANSITION_DIRS="${TRANSITION_DIRS}${dir}"$'\n'
-            else
-              echo "::notice::${dir}: no transition into ready_to_upload (${base_status} -> ${head_status}); skipped."
+            if [[ "$head_status" != "ready_to_upload" ]]; then
+              echo "::notice::${dir}: final status is '${head_status}'; only ready_to_upload is authorized. Skipped."
+              continue
             fi
+
+            # Commits in this push that touched the article directory, oldest first.
+            if [[ -z "$BASE_SHA" || "$BASE_SHA" == "$ZERO_SHA" ]]; then
+              COMMITS="$(git rev-list --reverse "$HEAD_SHA" -- "$dir" 2>/dev/null || true)"
+            else
+              COMMITS="$(git rev-list --reverse "$BASE_SHA..$HEAD_SHA" -- "$dir" 2>/dev/null || true)"
+            fi
+
+            # Walk the commits and keep the LAST transition into ready_to_upload;
+            # that commit is the authorized immutable content version.
+            AUTHORIZED=""
+            while IFS= read -r commit; do
+              [[ -z "$commit" ]] && continue
+
+              prev_meta="$(git show "${commit}^:${dir}/meta.json" 2>/dev/null || true)"
+              if [[ -n "$prev_meta" ]]; then
+                prev_status="$(printf '%s\n' "$prev_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
+              else
+                prev_status="<none>"
+              fi
+
+              cur_meta="$(git show "${commit}:${dir}/meta.json" 2>/dev/null || true)"
+              if [[ -n "$cur_meta" ]]; then
+                cur_status="$(printf '%s\n' "$cur_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
+              else
+                cur_status="<none>"
+              fi
+
+              if [[ "$cur_status" == "ready_to_upload" && "$prev_status" != "ready_to_upload" ]]; then
+                AUTHORIZED="$commit"
+              fi
+            done <<< "$COMMITS"
+
+            if [[ -z "$AUTHORIZED" ]]; then
+              echo "::notice::${dir}: no transition into ready_to_upload in this push (HEAD is ready but was already authorized before); skipped."
+              continue
+            fi
+
+            TRANSITION_DIRS="${TRANSITION_DIRS}${dir}"$'\t'"${AUTHORIZED}"$'\n'
+            echo "::notice::${dir}: authorization bound to commit ${AUTHORIZED}."
           done <<< "$DIRS"
 
           if [[ -z "$TRANSITION_DIRS" ]]; then
@@ -122,14 +154,15 @@ jobs:
           printf '%s\n' "${TRANSITION_DIRS%$'\n'}" > "${RUNNER_TEMP}/changed_dirs.txt"
 
           JSON="[]"
-          while IFS= read -r dir; do
-            [[ -z "$dir" ]] && continue
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            dir="${line%%$'\t'*}"
             JSON="$(printf '%s' "$JSON" | jq -c --arg d "$dir" '. + [$d]')"
           done <<< "$TRANSITION_DIRS"
           echo "changed_dirs=${JSON}" >> "$GITHUB_OUTPUT"
 
           echo "Articles entering ready_to_upload:"
-          printf '%s\n' "${TRANSITION_DIRS%$'\n'}" | sed 's/^/  - /'
+          printf '%s' "${TRANSITION_DIRS%$'\n'}" | sed 's/^/  - /' | sed "s/\t/ @ /"
 
       - name: Publish ready articles
         if: steps.detect.outputs.changed_dirs != '[]'
@@ -140,7 +173,7 @@ jobs:
           FAILED=0
           COUNT=0
 
-          while IFS= read -r dir; do
+          while IFS=$'\t' read -r dir auth_commit; do
             [[ -z "$dir" ]] && continue
             COUNT=$((COUNT + 1))
 
@@ -156,6 +189,12 @@ jobs:
               continue
             fi
 
+            if [[ -z "${auth_commit:-}" ]]; then
+              echo "::error::${dir}: no authorized source commit bound by the detect step; refusing to publish without a pinned content version."
+              FAILED=1
+              continue
+            fi
+
             article_id="$(jq -r '.article_id // ""' "$meta")"
             if [[ -z "$article_id" ]]; then
               article_id="$(basename "$dir")"
@@ -165,10 +204,10 @@ jobs:
               --arg repository "LyraWang6688/wechat-article-pilot" \
               --arg article_id "$article_id" \
               --arg ref "main" \
-              --arg source_commit "${GITHUB_SHA}" \
+              --arg source_commit "$auth_commit" \
               '{repository:$repository, article_id:$article_id, ref:$ref, source_commit:$source_commit}')"
 
-            echo "::notice::Ready article detected: ${dir} (article_id=${article_id})"
+            echo "::notice::Ready article detected: ${dir} (article_id=${article_id}, authorized_commit=${auth_commit})"
             echo "Publisher request body: ${body}"
 
             if [[ "${{ inputs.dry_run }}" == "true" ]]; then
