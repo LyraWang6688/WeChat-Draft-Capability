@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+/**
+ * validate-content.mjs — Content Workspace 结构校验脚本
+ * Owner: Agent A (Content Domain)
+ *
+ * 适配 Single-Repo 布局：
+ *   content/articles/
+ *   content/index.json
+ *
+ * 校验项：
+ *  1. JSON 可解析（index.json / meta.json / assets.json）
+ *  2. article_id 全局唯一（index 内 + 目录级）
+ *  3. status 符合枚举（draft | ready_to_upload）
+ *  4. index path 与 meta.article_id 匹配
+ *  5. meta 文件引用存在（source_file / content_file / assets_file）
+ *  6. index 与 meta 的 status / updated_at 一致
+ *  7. draft 状态允许 required asset 缺失（非阻塞告警）
+ *  8. ready_to_upload 状态要求所有 required asset 存在（阻塞失败）
+ *
+ * 用法：
+ *   node scripts/validate-content.mjs [<repo-root>]
+ * 默认根目录为本脚本所在目录的上一级（即仓库根）。
+ * 仅依赖 Node.js 内置模块，不引入任何外部依赖。
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, "..");
+const ROOT = path.resolve(process.argv[2] || DEFAULT_ROOT);
+
+const CONTENT_ROOT = path.join(ROOT, "content");
+const INDEX_PATH = path.join(CONTENT_ROOT, "index.json");
+const ARTICLES_ROOT = path.join(CONTENT_ROOT, "articles");
+
+const STATUS_ENUM = ["draft", "ready_to_upload"];
+const SCHEMA_VERSION = 1;
+const INDEX_RECORD_FIELDS = ["article_id", "title", "status", "path", "updated_at"];
+const META_REQUIRED_FIELDS = [
+  "schema_version",
+  "article_id",
+  "title",
+  "author",
+  "created_at",
+  "updated_at",
+  "status",
+  "source_file",
+  "content_file",
+  "assets_file"
+];
+
+const errors = [];
+const warnings = [];
+const check = (cond, msg) => {
+  if (!cond) errors.push(msg);
+};
+const warn = (msg) => warnings.push(msg);
+
+/* ---- 0. Content Workspace 存在性 ---- */
+check(fs.existsSync(CONTENT_ROOT), `Content Workspace 无效，缺少 content/ 目录: ${CONTENT_ROOT}`);
+check(fs.existsSync(ARTICLES_ROOT), `Content Workspace 无效，缺少 content/articles/ 目录: ${ARTICLES_ROOT}`);
+
+/* ---- 1. 读取并解析 index.json ---- */
+check(fs.existsSync(INDEX_PATH), "缺少索引文件: content/index.json");
+let indexData;
+if (fs.existsSync(INDEX_PATH)) {
+  try {
+    indexData = JSON.parse(fs.readFileSync(INDEX_PATH, "utf8"));
+  } catch (error) {
+    check(false, `content/index.json 不是合法 JSON: ${error.message}`);
+  }
+}
+const articles = Array.isArray(indexData?.articles) ? indexData.articles : [];
+const articleIds = articles.map((item) => item?.article_id).filter(Boolean);
+
+check(indexData?.schema_version === SCHEMA_VERSION, "index.json schema_version 必须为 1");
+check(new Set(articleIds).size === articleIds.length, "index.json 中存在重复 article_id");
+for (const record of articles) {
+  for (const field of INDEX_RECORD_FIELDS) {
+    check(record && field in record, `index 记录缺少字段 ${field}: ${record?.article_id ?? "(unknown)"}`);
+  }
+  check(STATUS_ENUM.includes(record?.status), `index 记录 status 非法: ${record?.article_id} -> ${record?.status}`);
+}
+
+/* ---- 2. 扫描 content/articles/{year}/{article_id} 目录，验证全局唯一与 index 覆盖 ---- */
+const dirArticleIds = [];
+if (fs.existsSync(ARTICLES_ROOT)) {
+  for (const yearEntry of fs.readdirSync(ARTICLES_ROOT, { withFileTypes: true })) {
+    if (!yearEntry.isDirectory()) continue;
+    const yearDir = path.join(ARTICLES_ROOT, yearEntry.name);
+    for (const dirEntry of fs.readdirSync(yearDir, { withFileTypes: true })) {
+      if (!dirEntry.isDirectory()) continue;
+      dirArticleIds.push({ id: dirEntry.name, dir: path.join(yearEntry.name, dirEntry.name) });
+    }
+  }
+}
+const dirIds = dirArticleIds.map((item) => item.id);
+check(new Set(dirIds).size === dirIds.length, "content/articles/ 下存在重复 article_id 目录");
+for (const entry of dirArticleIds) {
+  check(articleIds.includes(entry.id), `目录 content/articles/${entry.dir} 未登记到 content/index.json`);
+}
+for (const record of articles) {
+  check(dirIds.includes(record.article_id), `index 记录 ${record.article_id} 在 content/articles/ 下找不到对应目录`);
+}
+
+/* ---- 3. 逐篇文章校验 ---- */
+for (const record of articles) {
+  const articleId = record.article_id;
+  const dirPath = path.join(ROOT, record.path);
+  const metaPath = path.join(dirPath, "meta.json");
+
+  check(fs.existsSync(metaPath), `[${articleId}] path(${record.path}) 下缺少 meta.json`);
+  let meta;
+  if (fs.existsSync(metaPath)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    } catch (error) {
+      check(false, `[${articleId}] meta.json 不是合法 JSON: ${error.message}`);
+      continue;
+    }
+  } else {
+    continue;
+  }
+
+  check(meta.schema_version === SCHEMA_VERSION, `[${articleId}] meta.schema_version 必须为 1`);
+  for (const field of META_REQUIRED_FIELDS) {
+    check(field in meta, `[${articleId}] meta.json 缺少必填字段 ${field}`);
+  }
+  check(meta.article_id === articleId, `[${articleId}] meta.article_id(${meta.article_id}) 与 index 不一致`);
+  check(STATUS_ENUM.includes(meta.status), `[${articleId}] meta.status 非法: ${meta.status}`);
+  check(meta.status === record.status, `[${articleId}] index status(${record.status}) 与 meta status(${meta.status}) 不一致`);
+  check(meta.updated_at === record.updated_at, `[${articleId}] index updated_at(${record.updated_at}) 与 meta(${meta.updated_at}) 不一致`);
+
+  for (const ref of ["source_file", "content_file", "assets_file"]) {
+    check(
+      typeof meta[ref] === "string" && fs.existsSync(path.join(dirPath, meta[ref])),
+      `[${articleId}] meta.${ref}(${meta[ref]}) 引用的文件不存在`
+    );
+  }
+
+  let assets;
+  try {
+    assets = JSON.parse(fs.readFileSync(path.join(dirPath, meta.assets_file), "utf8"));
+  } catch (error) {
+    check(false, `[${articleId}] assets.json 不是合法 JSON: ${error.message}`);
+    continue;
+  }
+  check(assets.schema_version === SCHEMA_VERSION, `[${articleId}] assets.schema_version 必须为 1`);
+  check(assets.cover && typeof assets.cover === "object", `[${articleId}] assets.json 缺少 cover 对象`);
+  check(Array.isArray(assets.body_images), `[${articleId}] assets.body_images 必须是数组`);
+
+  const requiredAssets = [assets?.cover].filter((item) => item && item.required === true);
+  for (const asset of requiredAssets) {
+    const assetPath = path.join(dirPath, asset.path);
+    if (meta.status === "ready_to_upload") {
+      check(fs.existsSync(assetPath), `[${articleId}] ready_to_upload 要求 required asset 实际存在: ${asset.path}`);
+    } else if (!fs.existsSync(assetPath)) {
+      warn(`[${articleId}] required asset 缺失（draft 状态允许）: ${asset.path}`);
+    }
+    if (fs.existsSync(assetPath)) {
+      check(
+        path.dirname(assetPath).startsWith(path.join(dirPath, "assets") + path.sep) ||
+          path.dirname(assetPath) === path.join(dirPath, "assets"),
+        `[${articleId}] ${asset.path} 必须位于 assets/ 内`
+      );
+    }
+  }
+}
+
+/* ---- 4. 汇总 ---- */
+if (errors.length > 0) {
+  console.error(`❌ FAIL: ${errors.length} 个错误`);
+  for (const message of errors) {
+    console.error(`  - ${message}`);
+  }
+  process.exit(1);
+}
+
+console.log("✅ PASS: 全部检查通过");
+if (warnings.length > 0) {
+  console.log(`⚠️  ${warnings.length} 个告警（非阻塞）:`);
+  for (const message of warnings) {
+    console.log(`  - ${message}`);
+  }
+}
+process.exit(0);

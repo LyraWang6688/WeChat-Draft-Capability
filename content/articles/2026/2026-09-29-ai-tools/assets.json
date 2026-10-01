@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "cover": {
+    "path": "assets/cover.jpg",
+    "required": true
+  },
+  "body_images": []
+}
