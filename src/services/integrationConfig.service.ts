@@ -66,6 +66,12 @@ export class IntegrationConfigService {
     return binding ? sanitizeWechatBinding(binding) : undefined;
   }
 
+  /** 已脱敏的绑定列表，供 MCP 探测可用凭证来源。 */
+  async listWechatBindings() {
+    const config = await this.readConfig();
+    return config.wechatBindings.map((binding) => sanitizeWechatBinding(binding));
+  }
+
   async getWechatCredentials(baseToken: string, tableId: string): Promise<WechatCredentials> {
     const config = await this.readConfig();
     const binding = config.wechatBindings.find((item) => item.id === getBindingId(baseToken, tableId));

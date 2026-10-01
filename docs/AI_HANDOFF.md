@@ -221,3 +221,108 @@ npm run dev
 - 不要凭自然语言猜飞书 workflow JSON。
 - 不要一次性加复杂 workflow 字段；先最小可识别，再逐步加功能。
 - 每次推送后，都给用户服务器更新命令和确认版本命令。
+
+## 10. 补充（MCP 通道已落地）
+
+本节记录 2026-09-30 新增的本地 stdio MCP 通道，接手者若只关心「AI 生成 HTML → 公众号草稿箱」这条链路，看这里。
+
+### 10.1 新增文件
+
+```text
+src/mcp/wechatDraftServer.ts               MCP stdio 服务器入口，注册三个工具
+src/services/articleHtml.service.ts        HTML 解析、元数据提取、封面发现、图片扫描
+src/services/articlePublish.service.ts     上传编排：封面素材 -> 正文图片替换 -> 草稿创建
+scripts/mock-wechat-server.mjs             微信 API 测试替身（仅本地联调）
+scripts/mcp-e2e.mjs                        端到端自动化测试（41 项断言）
+docs/MCP_WECHAT_DRAFT.md                   完整使用文档
+```
+
+改动文件：
+
+- `src/config.ts`：新增 `WECHAT_APP_ID` / `WECHAT_APP_SECRET` / `WECHAT_DEFAULT_AUTHOR` / `WECHAT_CONTENT_MAX_BYTES` / `WECHAT_API_BASE` / `logToStderr`。
+- `src/utils/logger.ts`：支持把日志切到 stderr。
+- `src/services/wechat.service.ts`：`uploadPermanentImage` 支持内存 Buffer、`addDraftArticle` 支持留言开关、API 基地址改为可配置。
+- `src/services/integrationConfig.service.ts`：新增 `listWechatBindings()`。
+- `.env.example`、`README.md`、`package.json`：新增 MCP 相关配置、文档与脚本。
+
+### 10.2 必须记住的约束
+
+- **stdout 是 JSON-RPC 通道**。stdio 模式下任何写入 stdout 的日志都会破坏 MCP 协议握手。MCP 入口在 import 之前就设置 `MCP_LOG_TARGET=stderr`，`logger` 据此改写 `console.error`。新增日志代码时不要直接 `console.log`。
+- **工具入参只传文件路径，不传正文**。这是控制 token 消耗的核心设计，`upload_wechat_draft` 的唯一必填参数就是 `path`，自动化测试对此有断言。不要为了"方便"再加一个 `content_html` 参数。
+- **正文从磁盘读，图片也从磁盘读**。本地图片由 MCP 直接读文件上传微信素材库，不经过模型上下文。
+- **改动 `articlePublish.service.ts` 的返回结构时，同步改 `scripts/mcp-e2e.mjs` 的断言**。测试是唯一能防止返回结构悄悄漂移的护栏。
+
+### 10.3 验证命令
+
+```bash
+npm run typecheck
+npm run build
+npm run mcp:e2e          # 跑 src 源码
+npm run mcp:e2e:dist     # 跑 dist 编译产物
+```
+
+`npm run mcp:e2e` 会自己启动和关闭微信 API 测试替身，不需要真实公众号凭证，也不会真实上传。
+
+### 10.4 两条微信通道的关系
+
+现在有两处调用微信 API，共用同一个 `WechatService`：
+
+```text
+飞书通道   Base Workflow -> webhook -> SyncArticleService -> WechatService
+MCP 通道   AI 排版工具写 HTML 到磁盘 -> MCP 工具调用 -> ArticlePublishService -> WechatService
+```
+
+两条通道互不影响，凭证来源不同：
+
+- 飞书通道从 `.data/integration-config.json` 读取与多维表格绑定的凭证。
+- MCP 通道优先读 `.env` 的 `WECHAT_APP_ID` / `WECHAT_APP_SECRET`，找不到再兜底复用 `.data` 里的绑定。
+
+### 10.5 已明确不做的事
+
+- 不发布，只创建草稿。
+- 不做 Markdown → HTML 转换。
+- 不 sanitize 正文样式，只剥离文档骨架和替换图片链接。
+- 不支持 `data:` URI 图片。
+- 不支持单次多图文。
+
+### 10.6 第二轮修复（对抗式审查后）
+
+第二轮做了一次独立的对抗式代码审查，发现并修复了以下问题。这些问题里有几个是原测试**完全没覆盖**的，
+接手时请留意不要回退：
+
+| 编号 | 问题 | 修复方式 |
+|---|---|---|
+| D1 | **致命**：`wechatDraftServer.ts` 里 `process.env.MCP_LOG_TARGET = "stderr"` 写在 import 之后，但 ESM 会先求值 import，导致 logger 早已按「写 stdout」初始化。**默认启动即污染 JSON-RPC 通道，MCP 客户端握手失败** | 新增引导层 `src/mcp/main.ts`（先设环境变量，再动态 import 服务器）；`logger` 改为**每次写入时**读取该变量，不再固化成常量；e2e 不再注入该变量并逐行校验 stdout，防止回归 |
+| D2 | `MCP_ALLOWED_ROOTS` 只做字符串前缀比较，且只管 `path` 参数。四条绕过路径：符号链接逃逸、`coverImagePath` 越界、正文图片 `../` 越界、`meta.json` 的 cover 越界 | `realpath` 后再比较；`coverImagePath` / `meta.json` cover / 正文 `src` 全部纳入检查 |
+| D3 | `\bsrc\s*=` 中 `\b` 在 `-` 后成立，`data-src` 被当作 `src`：工具报成功，实际图片不显示 | 改为逐 `<img>` 标签 + 显式 `src` 属性匹配；`no-src`（懒加载写法）显式报告为 skipped |
+| D4 | 正文限制写成 64KB，官方 draft/add 写「不可超过 2kb，少于 2 万字符、小于 1M」 | 默认改为 2KB + 2 万字符，并校验 title≤32 / author≤16 / digest≤120 |
+| D5 | 正文图片走 `material/add_material`，官方要求走 `media/uploadimg`（且 uploadimg 不占 10 万张素材配额） | 新增 `WechatService.uploadArticleImage`：优先 uploadimg，失败/格式不支持时回退永久素材并在返回值说明 |
+| D7 | `redactText` 对 URL 形态密钥只遮中间一段（32 位泄漏 24 位），还把 `upload_wechat_draft_failed` 截成 `upload_wechat_***iled` | 改为「敏感键名 + 值」脱敏，且不得再加捕获组（会右移 replace 回调参数） |
+| D8 | `skipped` 里回显完整 base64 data URI，反噬 token 设计 | 改为固定占位符，不回显内容 |
+| D10 | `.env` 残留 `WECHAT_API_BASE` 时 `wechat_draft_status` 会对测试替身报「凭证有效」 | 返回值新增 `apiBase` / `apiBaseIsProduction` / `warning` |
+| D11 | `!response.expires_in` 把合法的 0 当缺失 | 只校验 access_token，expires_in 缺失时退化为 300 秒 |
+| D12 | `envCredentials` 死代码 | 删除 |
+
+### 10.7 测试护栏（共 145 项断言）
+
+```bash
+npm test               # 四组全跑
+npm run test:unit      # 72 项 解析/校验/脱敏
+npm run test:sandbox   # 16 项 沙箱逃逸
+npm run test:fallback  # 10 项 uploadimg 回退
+npm run mcp:e2e        # 47 项 MCP 协议 + 上传链路
+npm run mcp:e2e:dist   # 对 dist 产物再跑一遍
+```
+
+两条最重要的护栏，改动相关代码时不要削弱：
+
+1. **e2e 不注入 `MCP_LOG_TARGET`，且逐行断言 stdout 只有合法 JSON-RPC**。这直接覆盖 D1。
+2. **e2e 从继承环境剔除所有 `WECHAT_*`，用独立 `.env` + `DOTENV_CONFIG_PATH` 提供凭证**。
+   这保证「凭证取自 `.env`」是真的被测到，而不是被环境变量掩盖。
+
+### 10.8 已知限制（有意保留）
+
+- 图片解析用正则，不引入 HTML 解析库。`alt="a > b"` 这类属性值含裸 `>` 会截断标签解析。
+- `data:` URI 图片不支持（微信素材接口不收 base64），会报告为 skipped。
+- 单篇图文，不支持一次草稿多篇文章。
+- 只创建草稿，不发布。

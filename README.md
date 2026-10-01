@@ -13,12 +13,56 @@
 - Workflow webhook 接收 `record_id`
 - 通过 `record_id` 读取一条 Base 记录的完整数据
 
+同时提供一条**独立的 MCP 通道**：把 AI 工具生成的微信公众号 HTML 排版文件一键上传到公众号后台草稿箱，不需要经过飞书。详见 [微信公众号草稿 MCP](docs/MCP_WECHAT_DRAFT.md)。
+
+## 微信公众号草稿 MCP
+
+本地 stdio MCP 服务器，让 AI 工具生成的 HTML 排版文件通过一次工具调用进入公众号草稿箱。
+
+核心设计：**工具入参只有一个文件路径，正文不经过模型上下文**，因此 token 消耗与文章长度无关。
+
+```bash
+# 配置 .env 中的 WECHAT_APP_ID / WECHAT_APP_SECRET
+npm run mcp            # 源码模式启动 stdio MCP
+npm run build          # 或编译后用 dist 产物（启动更快）
+npm run mcp:start
+```
+
+三个工具：
+
+```text
+upload_wechat_draft     读取 HTML -> 上传封面与正文图片 -> 创建公众号草稿
+inspect_wechat_article  预检：回显元数据、封面候选、图片清单、阻塞问题（不调用微信）
+wechat_draft_status     检查凭证是否可用（不返回密钥）
+```
+
+文章目录约定：
+
+```text
+my-article/
+├── article.html   # 正文（必需）
+├── meta.json      # 元数据（可选：title / author / digest / column / cover）
+├── cover.png      # 封面（可选，自动发现）
+└── images/        # 正文本地图片（自动上传并替换链接）
+```
+
+端到端验证（内置微信 API 测试替身，不需要真实凭证）：
+
+```bash
+npm test   # 全部四组，共 145 项断言
+```
+
+`npm test` 依次运行 typecheck、纯函数单测、沙箱逃逸测试、uploadimg 回退测试，
+以及 MCP 协议 + 完整上传链路的端到端测试，最后对编译产物再跑一遍 e2e。
+
+完整说明、客户端配置和常见问题：[docs/MCP_WECHAT_DRAFT.md](docs/MCP_WECHAT_DRAFT.md)
+
 ## 技术栈
 
 - 后端：Node.js + TypeScript + Express
 - 前端：静态 HTML + vanilla JS，由后端直接 serve
 - 飞书侧：`lark-cli` 子进程调用，优先使用用户身份授权
-- 微信侧：当前暂不接入，后续通过 HTTP API 调用公众号后台
+- 微信侧：HTTP API 调用公众号后台，通过 MCP（stdio）或飞书 webhook 两条通道触发
 
 ## 推荐开发方式
 
@@ -315,7 +359,7 @@ LOG_CLI_STDERR_MAX_CHARS=4000
 ## 安全注意
 
 - 飞书 `appSecret` 通过 `stdin` 传给 `lark-cli`，不拼接到命令行参数。
-- 微信 `AppSecret` 当前只做前端占位，尚未提交保存。
+- 微信 `AppSecret` 只存在 `.env`（已 gitignore）或 MCP 客户端的 `env` 中，接口不返回前端、不进入工具返回值；MCP 日志已切到 stderr。
 - P0 阶段未接 Supabase，不做多用户配置持久化。
 - `.env` 不进入 Git，提交前请确认没有密钥、token、真实 AppSecret。
 
@@ -325,5 +369,5 @@ LOG_CLI_STDERR_MAX_CHARS=4000
 - 开发阶段优先使用服务器开发执行机，稳定后再整理生产部署目录。
 - 模板表已支持通过 `+table-create` 创建；Workflow 自动创建后续再接。
 - Workflow JSON 模板后续基于真实字段 ID 和公网 webhook URL 生成。
-- 微信侧后续接入 `access_token`、永久素材、草稿新增和草稿更新。
+- 微信侧已通过 MCP 打通 `access_token`、永久素材、草稿新增；飞书 webhook 通道也已接入同一套 `WechatService`。
 - 引入 Supabase 存储用户配置、授权状态、Base 坐标和微信配置。

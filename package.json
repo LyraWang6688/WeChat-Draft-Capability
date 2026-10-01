@@ -8,20 +8,31 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "mcp": "tsx src/mcp/main.ts",
+    "mcp:start": "node dist/mcp/main.js",
+    "test:mcp:unit": "node --import tsx scripts/unit-tests.mts",
+    "test:mcp:sandbox": "node --import tsx scripts/sandbox-tests.mts",
+    "test:mcp:fallback": "node --import tsx scripts/uploadimg-fallback-test.mts",
+    "test:mcp:e2e": "node scripts/mcp-e2e.mjs",
+    "test:mcp:e2e:dist": "npm run build && node scripts/mcp-e2e.mjs --dist",
+    "test:mcp": "npm run test:mcp:unit && npm run test:mcp:sandbox && npm run test:mcp:fallback && npm run test:mcp:e2e && npm run test:mcp:e2e:dist",
+    "test": "vitest run",
+    "test:all": "npm run typecheck && npm test && npm run test:mcp",
+    "test:watch": "vitest",
     "pm2:dev": "pm2 start ecosystem.config.cjs --only wechat-article-pilot-dev",
     "pm2:dev:restart": "pm2 restart wechat-article-pilot-dev",
     "pm2:dev:logs": "pm2 logs wechat-article-pilot-dev",
     "pm2:dev:stop": "pm2 stop wechat-article-pilot-dev",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

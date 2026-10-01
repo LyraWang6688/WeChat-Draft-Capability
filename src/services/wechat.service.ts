@@ -11,6 +11,17 @@ export type WechatDraftArticleInput = {
   digest?: string;
   content: string;
   thumbMediaId: string;
+  needOpenComment?: 0 | 1;
+  onlyFansCanComment?: 0 | 1;
+};
+
+export type WechatPermanentImageInput = {
+  credentials: WechatCredentials;
+  /** 本地文件路径；与 fileBuffer 二选一 */
+  filePath?: string;
+  /** 内存中的图片内容；优先于 filePath */
+  fileBuffer?: Buffer;
+  fileName?: string;
 };
 
 type WechatAccessTokenCache = {
@@ -38,13 +49,25 @@ type WechatDraftResponse = {
   errmsg?: string;
 };
 
+type WechatUploadImgResponse = {
+  url?: string;
+  errcode?: number;
+  errmsg?: string;
+};
+
 export class WechatService {
   private readonly accessTokenCache = new Map<string, WechatAccessTokenCache>();
 
-  async uploadPermanentImage(input: { credentials: WechatCredentials; filePath: string; fileName?: string }) {
+  async uploadPermanentImage(input: WechatPermanentImageInput) {
     const accessToken = await this.getAccessToken(input.credentials);
-    const fileName = input.fileName || path.basename(input.filePath);
-    const fileBuffer = await readFile(input.filePath);
+    const fileName = input.fileName || (input.filePath ? path.basename(input.filePath) : "image.png");
+    const fileBuffer = input.fileBuffer ?? (input.filePath ? await readFile(input.filePath) : undefined);
+    if (!fileBuffer) {
+      throw new HttpError(500, "上传永久素材缺少文件内容", "WECHAT_MATERIAL_MISSING_FILE", {
+        hasFilePath: Boolean(input.filePath),
+        hasFileBuffer: Boolean(input.fileBuffer)
+      });
+    }
     const formData = new FormData();
     formData.append("media", new Blob([new Uint8Array(fileBuffer)], { type: getMimeType(fileName) }), fileName);
 
@@ -54,7 +77,7 @@ export class WechatService {
       fileSize: fileBuffer.length
     });
     const response = await this.fetchJson<WechatMaterialResponse>(
-      `https://api.weixin.qq.com/cgi-bin/material/add_material?access_token=${encodeURIComponent(accessToken)}&type=image`,
+      `${appConfig.wechatApiBase}/cgi-bin/material/add_material?access_token=${encodeURIComponent(accessToken)}&type=image`,
       {
         method: "POST",
         body: formData
@@ -79,6 +102,87 @@ export class WechatService {
     };
   }
 
+  /**
+   * 上传「图文消息内的图片」，返回可嵌入正文的 URL。
+   *
+   * 官方 draft/add 文档要求正文图片 URL 来自 media/uploadimg；该接口上传的图片
+   * 不占用公众号素材库 10 万张配额，只支持 jpg/png 且小于 1MB。
+   * 任何失败（格式不支持、超过 1MB、账号权限）都回退到永久素材，保证正文图片不丢。
+   */
+  async uploadArticleImage(
+    input: WechatPermanentImageInput
+  ): Promise<{ url: string; mediaId?: string; via: "uploadimg" | "material"; note?: string }> {
+    const fileName = input.fileName || (input.filePath ? path.basename(input.filePath) : "image.png");
+    const buffer = input.fileBuffer ?? (input.filePath ? await readFile(input.filePath) : undefined);
+    if (!buffer) {
+      throw new HttpError(500, "上传正文图片缺少文件内容", "WECHAT_ARTICLE_IMAGE_MISSING_FILE", {
+        hasFilePath: Boolean(input.filePath),
+        hasFileBuffer: Boolean(input.fileBuffer)
+      });
+    }
+
+    const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
+    const formatSupported = extension === "jpg" || extension === "jpeg" || extension === "png";
+    const withinSizeLimit = buffer.length <= 1024 * 1024;
+
+    if (formatSupported && withinSizeLimit) {
+      try {
+        const accessToken = await this.getAccessToken(input.credentials);
+        const formData = new FormData();
+        formData.append("media", new Blob([new Uint8Array(buffer)], { type: getMimeType(fileName) }), fileName);
+
+        logger.info("wechat_uploadimg_start", {
+          fileName,
+          fileSize: buffer.length
+        });
+        const response = await this.fetchJson<WechatUploadImgResponse>(
+          `${appConfig.wechatApiBase}/cgi-bin/media/uploadimg?access_token=${encodeURIComponent(accessToken)}`,
+          {
+            method: "POST",
+            body: formData
+          }
+        );
+        assertWechatSuccess(response, "WECHAT_UPLOADIMG_FAILED");
+        if (response.url) {
+          logger.info("wechat_uploadimg_success", {
+            fileName,
+            url: response.url
+          });
+          return {
+            url: response.url,
+            via: "uploadimg"
+          };
+        }
+        logger.warn("wechat_uploadimg_no_url", {
+          fileName,
+          response
+        });
+      } catch (error) {
+        // 回退到永久素材：多占一张配额，但正文图片一定能用
+        logger.warn("wechat_uploadimg_failed_fallback_to_material", {
+          fileName,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    const material = await this.uploadPermanentImage({
+      ...input,
+      fileName
+    });
+    if (!material.url) {
+      throw new HttpError(502, "永久素材接口未返回 url，无法嵌入正文图片", "WECHAT_MATERIAL_NO_URL", material.raw);
+    }
+    return {
+      url: material.url,
+      mediaId: material.mediaId,
+      via: "material",
+      note: formatSupported
+        ? "media/uploadimg 未成功，已回退永久素材（会占用素材库图片配额）"
+        : `格式 ${extension || "未知"} 不被 media/uploadimg 支持（仅 jpg/png），已使用永久素材`
+    };
+  }
+
   async addDraftArticle(input: WechatDraftArticleInput & { credentials: WechatCredentials }) {
     const accessToken = await this.getAccessToken(input.credentials);
     const article = {
@@ -88,8 +192,8 @@ export class WechatService {
       digest: input.digest,
       content: input.content,
       thumb_media_id: input.thumbMediaId,
-      need_open_comment: 0,
-      only_fans_can_comment: 0
+      need_open_comment: input.needOpenComment ?? 0,
+      only_fans_can_comment: input.onlyFansCanComment ?? 0
     };
 
     logger.info("wechat_draft_add_start", {
@@ -100,7 +204,7 @@ export class WechatService {
       thumbMediaId: input.thumbMediaId
     });
     const response = await this.fetchJson<WechatDraftResponse>(
-      `https://api.weixin.qq.com/cgi-bin/draft/add?access_token=${encodeURIComponent(accessToken)}`,
+      `${appConfig.wechatApiBase}/cgi-bin/draft/add?access_token=${encodeURIComponent(accessToken)}`,
       {
         method: "POST",
         headers: {
@@ -147,7 +251,7 @@ export class WechatService {
       appId
     });
     const response = await this.fetchJson<WechatAccessTokenResponse>(
-      `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(
+      `${appConfig.wechatApiBase}/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(
         appId
       )}&secret=${encodeURIComponent(appSecret)}`,
       {
@@ -156,16 +260,19 @@ export class WechatService {
     );
 
     assertWechatSuccess(response, "WECHAT_ACCESS_TOKEN_FAILED");
-    if (!response.access_token || !response.expires_in) {
+    // 只用 access_token 判断响应是否完整。之前用 `!response.expires_in` 会把
+    // 合法的 expires_in=0 当成缺失而误报；缺失/非正数时退化为保守的 300 秒缓存。
+    if (!response.access_token) {
       throw new HttpError(502, "微信 access_token 响应不完整", "WECHAT_ACCESS_TOKEN_INVALID_RESPONSE", response);
     }
 
+    const expiresIn = typeof response.expires_in === "number" && response.expires_in > 0 ? response.expires_in : 300;
     this.accessTokenCache.set(appId, {
       accessToken: response.access_token,
-      expiresAt: Date.now() + Math.max(response.expires_in - 300, 60) * 1000
+      expiresAt: Date.now() + Math.max(expiresIn - 300, 60) * 1000
     });
     logger.info("wechat_access_token_fetch_success", {
-      expiresIn: response.expires_in
+      expiresIn
     });
     return response.access_token;
   }
