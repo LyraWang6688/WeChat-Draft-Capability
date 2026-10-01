@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>这个 title 会被 meta.json 覆盖，用来演示优先级</title>
+</head>
+<body>
+  <h1 style="font-size:22px;font-weight:bold;color:#1a1a1a;line-height:1.5;margin:0 0 16px;">
+    示例文章：AI 工具生成的公众号排版
+  </h1>
+
+  <p style="font-size:16px;color:#333;line-height:1.75;margin:0 0 16px;letter-spacing:0.5px;">
+    这个目录演示 MCP 的自动发现能力：正文只传一个路径，标题、作者、摘要、封面、正文图片
+    全部从磁盘自动读取，不经过模型上下文。
+  </p>
+
+  <section style="background:#f7f7f7;border-left:4px solid #07c160;padding:12px 16px;margin:0 0 16px;border-radius:4px;">
+    <p style="font-size:15px;color:#555;line-height:1.7;margin:0;">
+      下一步：把 <strong>examples/sample-article</strong> 替换成你自己的文章目录。
+      排版规则：所有样式写在内联 <code>style</code> 属性里，微信编辑器的兼容性最好。
+    </p>
+  </section>
+
+  <p style="margin:0 0 16px;">
+    <img src="images/fig1.png" style="width:100%;display:block;border-radius:6px;" alt="示意图 1" />
+  </p>
+
+  <p style="font-size:16px;color:#333;line-height:1.75;margin:0 0 16px;">
+    上面这张本地图片会被 MCP 上传到微信永久素材库，并把 <code>src</code> 替换成微信返回的 URL。
+  </p>
+
+  <p style="margin:0 0 16px;">
+    <img src="images/fig2.png" style="width:100%;display:block;border-radius:6px;" alt="示意图 2" />
+  </p>
+
+  <p style="font-size:16px;color:#333;line-height:1.75;margin:0;">
+    同一张图片多次出现时只会上传一次；缺失的本地文件不会中断上传，而是出现在 <code>images.skipped</code> 里。
+  </p>
+</body>
+</html>
