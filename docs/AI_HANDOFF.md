@@ -2,7 +2,7 @@
 
 ## 1. Repository Identity
 
-Canonical Repository：`LyraWang6688/wechat-article-pilot`。
+Canonical Repository：`LyraWang6688/WeChat-Draft-Capability`。
 唯一 Current Agent Entry：[根 AGENTS.md](../AGENTS.md)。本文是工程说明；[content/AI_HANDOFF.md](../content/AI_HANDOFF.md) 仅负责内容操作。[README](../README.md) 是产品/API/环境变量说明。
 旧 Feishu 文档均为 HISTORICAL ONLY，不要以“先跑通飞书”作为当前任务。
 
@@ -65,7 +65,7 @@ Publisher 不改文章 meta.json、不回写 Content status；GitHub adapter 当
 
 ## 8. Brand Ownership / Creative Boundary
 
-正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+正式 Brand Owner：`LyraWang6688/WeChat-Draft-Capability`。
 [content/brand/one-page-wechat.md](../content/brand/one-page-wechat.md) 是品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 SSOT，直接维护，不设外部 upstream 或同步副本，不另建 Brand SSOT。
 
 AI creation = Flexible / Human-driven / Non-linear；Title、Polish、Fact Check、GEO、Layout、Cover、Publish Check 可按需要组合。
@@ -86,7 +86,7 @@ Runtime decommissioned / exposure retired；旧 public、lark services、routes�
 
 ## 11. Experimental MCP PR #3
 
-[PR #3](https://github.com/LyraWang6688/wechat-article-pilot/pull/3) 是 Experimental / Deferred Product Channel；2026-10-02 核验 OPEN、未合并、未删除，不属于当前 main production path。未经明确决定不合并或删除。
+[PR #3](https://github.com/LyraWang6688/WeChat-Draft-Capability/pull/3) 是 Experimental / Deferred Product Channel；2026-10-02 核验 OPEN、未合并、未删除，不属于当前 main production path。未经明确决定不合并或删除。
 
 ## 12. What NOT to Do
 

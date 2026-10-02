@@ -24,7 +24,7 @@ content/articles/{year}/{article_id}/
 
 ## One Page 在哪里
 
-[content/brand/one-page-wechat.md](brand/one-page-wechat.md) 是微信公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth。正式 Brand Owner 是 `LyraWang6688/wechat-article-pilot`，规则直接在该文件维护，不建立外部 upstream 或同步副本关系。
+[content/brand/one-page-wechat.md](brand/one-page-wechat.md) 是微信公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth。正式 Brand Owner 是 `LyraWang6688/WeChat-Draft-Capability`，规则直接在该文件维护，不建立外部 upstream 或同步副本关系。
 
 ## Article Package 构成
 

@@ -142,7 +142,7 @@ jobs:
             fi
 
             body="$(jq -nc \
-              --arg repository "LyraWang6688/wechat-article-pilot" \
+              --arg repository "LyraWang6688/WeChat-Draft-Capability" \
               --arg article_id "$article_id" \
               --arg ref "main" \
               --arg source_commit "$source_commit" \

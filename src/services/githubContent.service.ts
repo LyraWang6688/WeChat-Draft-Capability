@@ -198,7 +198,7 @@ export class GithubContentService {
           Authorization: `Bearer ${this.token}`,
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "wechat-article-pilot"
+          "User-Agent": "wechat-draft-capability"
         },
         signal: AbortSignal.timeout(this.timeoutMs)
       });
@@ -241,7 +241,7 @@ export class GithubContentService {
             Authorization: `Bearer ${this.token}`,
             Accept: "application/vnd.github.raw",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "wechat-article-pilot"
+            "User-Agent": "wechat-draft-capability"
           },
           signal: AbortSignal.timeout(this.timeoutMs)
         });

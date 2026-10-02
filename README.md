@@ -1,9 +1,9 @@
-# WeChat Article Pilot
+# WeChat Draft Capability
 
 ## 1. What It Is
 
 在单一仓库中维护公众号 Article Package，由人授权具体内容版本，经 GitHub Actions 与 Publisher 送入微信公众号草稿箱。
-Canonical Repository：`LyraWang6688/wechat-article-pilot`。正式发布由 Lyra 人工完成。
+Canonical Repository：`LyraWang6688/WeChat-Draft-Capability`。正式发布由 Lyra 人工完成。
 Agent 唯一当前入口：[AGENTS.md](AGENTS.md)；工程交接见 [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md)。
 
 ## 2. Current Architecture
@@ -69,7 +69,7 @@ Human Intent → status transition → authorized commit
 
 ### Brand Ownership
 
-正式 Brand Owner：`LyraWang6688/wechat-article-pilot`。
+正式 Brand Owner：`LyraWang6688/WeChat-Draft-Capability`。
 [content/brand/one-page-wechat.md](content/brand/one-page-wechat.md) 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格与 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth，直接在本仓库维护，不建立外部 upstream 或同步副本关系。
 
 ### Creative Layer / Publishing Runtime Boundary
@@ -84,7 +84,7 @@ Publishing Runtime 由 Contract 驱动并 fail-closed；创作能力不进入 Gi
 
 ```json
 {
-  "repository": "LyraWang6688/wechat-article-pilot",
+  "repository": "LyraWang6688/WeChat-Draft-Capability",
   "article_id": "2026-09-29-ai-tools",
   "ref": "main",
   "source_commit": "b673a64e13cd8c0f80aee601809386f46c44e9ae"
@@ -122,7 +122,7 @@ Publishing Runtime 由 Contract 驱动并 fail-closed；创作能力不进入 Gi
 | 变量 | 用途 / 默认值 |
 | --- | --- |
 | `PUBLISHER_STATE_FILE` | cwd 下 `.data/publisher-state.json` |
-| `PUBLISHER_ALLOWED_REPOSITORIES` | `LyraWang6688/wechat-article-pilot`，逗号分隔 |
+| `PUBLISHER_ALLOWED_REPOSITORIES` | `LyraWang6688/WeChat-Draft-Capability`，逗号分隔 |
 | `GITHUB_API_TIMEOUT_MS` | `30000` |
 | `WECHAT_API_TIMEOUT_MS` | `120000` |
 | `PORT` | 代码默认 `3000`，`.env.example` / PM2 dev 为 `3010` |
@@ -150,4 +150,4 @@ Feishu 已不是 Current Publishing Control Plane。Legacy Feishu Runtime Exposu
 
 ## 11. Experimental MCP Channel
 
-[PR #3](https://github.com/LyraWang6688/wechat-article-pilot/pull/3) 是 Experimental / Deferred Product Channel。2026-10-02 核验为 OPEN、未合并、未删除，不属于当前 main production path。本阶段不合并或删除它。
+[PR #3](https://github.com/LyraWang6688/WeChat-Draft-Capability/pull/3) 是 Experimental / Deferred Product Channel。2026-10-02 核验为 OPEN、未合并、未删除，不属于当前 main production path。本阶段不合并或删除它。
