@@ -87,7 +87,6 @@ K. **已修复**：`vitest.config.ts` 显式排除 `dist/**`，避免编译副�
 - ~~Validator validates HEAD，Publisher may publish authorized commit~~ → 见 Resolved 项 A。
 - ~~Docs/Validator filename references vs Publisher fixed content.html/assets.json contract drift~~ → 见 Resolved 项 B。
 
-Phase A（只记录、不修代码）已由本次 Six-Finding Correction pass 结束。
 
 ## MCP PR #3
 
