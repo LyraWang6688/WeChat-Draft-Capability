@@ -81,9 +81,8 @@ B. Docs / Validator 支持 content_file/assets_file 引用，Publisher 固定 co
 
 ## 10. Legacy Feishu Status
 
-Runtime decommissioned / exposure retired；旧 public、lark services、routes、templates 分类 **LEGACY_IMPLEMENTATION**，不是 CURRENT_ARCHITECTURE。
-Physical cleanup deferred until first real E2E approval。
-LARK_CLI_INIT_CONTEXT、TEMPLATE_SCHEMA、WORKFLOW_FEASIBILITY、CLI_INTEGRATION_LESSONS、REMOTE_SERVER_DEV 保留为历史资料，不执行其中旧联调或部署指令。
+Runtime decommissioned / exposure retired；旧 public、lark services、routes、templates 的 physical implementation 已在 repository physical cleanup 中移除，不是 CURRENT_ARCHITECTURE。
+历史资料归档于 [docs/archive/legacy-feishu/](archive/legacy-feishu/README.md)（HISTORICAL ONLY），不执行其中旧联调或部署指令。
 
 ## 11. Experimental MCP PR #3
 
