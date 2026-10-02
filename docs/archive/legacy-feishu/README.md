@@ -1,6 +1,6 @@
 # Legacy Feishu Archive — HISTORICAL ONLY
 
-本目录归档已退出 Current Publishing Chain 的 Feishu / Lark 运行时历史资料。
+本目录归档已退出 Current Publishing Chain 的 Feishu / Lark 运行时历史资料。Feishu Runtime Exposure 已关闭，对应 physical implementation 已在经明确批准、dependency-evidence 驱动的 repository hygiene cleanup 中退役。
 
 - 这些文档仅作为历史背景、联调教训与决策上下文保留。
 - **不代表当前架构，不执行其中任何旧联调、部署或运维指令。**
