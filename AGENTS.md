@@ -111,5 +111,4 @@ git diff --check
 - 历史文档标 HISTORICAL ONLY，不能作为当前任务或部署指令。
 - repo hygiene 不 production publishing、不发真实草稿、不触发 workflow；不部署或改 secrets。
 - 不删 ledger；legacy physical cleanup 仅在明确批准并完成 dependency evidence 后执行，且不得改变 Current Publishing Logic；E2E 属于独立发布验证流程，不是 Repository Hygiene Gate；不改 PM2 name/path。
-- 本 Phase A 禁改 publishing / Validator / Publisher / WeChat 业务逻辑；不修 P1、不清理分支/worktree、不 merge/delete PR #3。
-  （注：Phase A 已由本次 Six-Finding Correction pass 结束。此后对 publishing / Validator / Publisher / WeChat 语义的改动仍须有明确任务与对应回归。）
+- Publishing / Validator / Publisher / WeChat 等 Safety-Critical Logic 仅在有明确任务、明确 scope 与对应 regression evidence 时修改，不得顺手重构；branch/worktree cleanup 独立处理，不擅自 merge/delete MCP PR #3。
