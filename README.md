@@ -19,7 +19,7 @@ content/articles/** → Content Validator → GitHub main
 → WechatService → 微信公众号 Draft
 ```
 
-工作流在 main 的内容 push 时运行，也支持 main 上的手动 dispatch；先校验 checkout HEAD，再扫描提交中的授权转换。最终 HEAD 必须仍为 `ready_to_upload`，并选取扫描范围内最后一次进入 ready 的提交。手动 dispatch 默认会调用 API，仅 `dry_run=true` 时不调用。
+工作流在 main 的内容 push 时运行，也支持 main 上的手动 dispatch。链路为：先用共享检测脚本扫描 push range 内的授权转换（候选目录取自 range 内任意 commit 触过的目录，而非 BASE↔HEAD endpoint diff），再对每个 exact authorized commit 运行同一套 Content Validator，仅当全部通过才携带该 `source_commit` 调用 Publisher。最终 HEAD 必须仍为 `ready_to_upload`，并选取扫描范围内最后一次进入 ready 的提交。手动 dispatch 默认会调用 API，仅 `dry_run=true` 时不调用。
 
 当前 Express runtime（`src/app.ts`）只暴露 `GET /api/health` 与 `POST /api/publisher/drafts`；未挂载 Feishu、system、template、integration 路由，也不 serve `public/**`。其余路径返回 404。
 
@@ -65,7 +65,7 @@ Human Intent → status transition → authorized commit
 
 `content/index.json` 是低 token 索引，需与 meta 的 id/title/status/updated_at 一致。draft 可缺封面文件，ready 必须满足 required asset 存在性校验。完整内容约定见 [content/SCHEMA.md](content/SCHEMA.md)，内容操作见 [content/AI_HANDOFF.md](content/AI_HANDOFF.md)。
 
-**KNOWN CONTRACT GAP（P1，未修复）**：Docs / Validator 支持 `meta.content_file`、`meta.assets_file` 引用；Publisher 固定读取 `content.html`、`assets.json`。Validator 当前校验 HEAD，Publisher 可能交付较早的 authorized commit。不得宣称两者已完全一致。
+**Article Contract v1（已冻结）**：每个 Article Package 的正式文件名固定为 `meta.json`、`source.md`、`content.html`、`assets.json`，不再支持 `meta.content_file` / `meta.assets_file` 等可配置文件名；Docs、Validator、Publisher 三者语义一致。被发送给 Publisher 的 exact authorized commit 会先通过同一套 Content Validator（validated SHA == published SHA）。这仅代表结构契约已统一，不代表已完成真实微信 E2E。
 
 ### Brand Ownership
 
@@ -128,7 +128,7 @@ Publishing Runtime 由 Contract 驱动并 fail-closed；创作能力不进入 Gi
 | `PORT` | 代码默认 `3000`，`.env.example` / PM2 dev 为 `3010` |
 | `LOG_LEVEL` | `info` |
 
-Workflow Secrets：`PUBLISHER_ENDPOINT`（服务 base URL）与 `PUBLISHER_WEBHOOK_TOKEN`。微信和 GitHub 内容凭证不交给 workflow。
+Workflow Secrets：`PUBLISHER_ENDPOINT`（服务 base URL，仅 workflow 使用，服务端 `src/config.ts` 不读取）与 `PUBLISHER_WEBHOOK_TOKEN`（**共享凭证**：必须与 Publisher 服务端配置为同一值，workflow 用它发送 Bearer、服务端用它校验）。微信和 GitHub 内容凭证不交给 workflow。
 
 ## 9. Validation / Tests
 
@@ -140,7 +140,7 @@ node scripts/validate-content.mjs
 git diff --check
 ```
 
-这是本地结构与自动化验证，不证明真实微信 E2E 或线上部署。开发命令 `npm run dev`；编译 `npm run build`；运行编译结果 `npm start`。Node 版本需满足 lockfile 中依赖的 engines。
+这是本地结构与自动化验证，不证明真实微信 E2E 或线上部署。正式只读 CI（`.github/workflows/ci.yml`）在每个指向 main 的 PR 与 main push 上执行 `npm ci`、typecheck、tests、validator 以及已提交 diff 的 whitespace 检查；CI 不引用任何发布密钥、不调用 Publisher / 微信、无外部写副作用，与发布工作流严格分离。开发命令 `npm run dev`；编译 `npm run build`；运行编译结果 `npm start`。Node 版本需满足 lockfile 中依赖的 engines。
 PM2 配置仍为 `wechat-article-pilot-dev`、`/opt/wechat-article-pilot-dev`；本次 hygiene 不执行部署或重启。
 
 ## 10. Legacy Feishu Status
