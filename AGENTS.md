@@ -40,8 +40,10 @@ Publishing Runtime = Deterministic / Contract-driven / Fail-closed；不把创�
 
 ## Safety-Critical Files
 
-- .github/workflows/publish-ready-articles.yml：授权转换与不可变提交。
-- scripts/validate-content.mjs：Content Contract gate。
+- .github/workflows/ci.yml：只读 CI Safety Gate（无 secret、无外部副作用）。
+- .github/workflows/publish-ready-articles.yml：授权转换编排与不可变提交。
+- scripts/detect-ready-transitions.mjs + scripts/lib/detect-transitions.mjs：授权转换检测唯一实现。
+- scripts/validate-content.mjs + scripts/lib/content-validator.mjs + scripts/lib/reader.mjs：Content Contract 唯一规则（workspace / exact-ref 两模式）。
 - src/services/publisher.service.ts：幂等与微信副作用编排。
 - src/services/publisherStorage.service.ts：ledger integrity、写入顺序。
 - .data/publisher-state.json：DELIVERY_STATE（或 PUBLISHER_STATE_FILE 配置路径）。
@@ -57,11 +59,34 @@ Publisher Ledger、content.html、assets.json、Human Authorization workflow、B
 Feishu 非 Current Publishing Control Plane；Runtime = retired，physical implementation（public / lark services / legacy routes/templates）已在经明确批准、dependency-evidence 驱动的 repository hygiene cleanup 中退役。
 历史资料归档于 docs/archive/legacy-feishu/（HISTORICAL ONLY），仅保留历史背景，不作为当前架构、任务或部署指令。
 
+## Resolved Pre-E2E Correctness Items
+
+Pre-E2E Safety Gate 已修复（结构与自动化层面）：
+
+A. **已修复**：被发送给 Publisher 的 exact authorized commit 先通过同一套 Content Validator（`validate-content.mjs --ref`），validated SHA == published SHA，不再只校验 HEAD。
+B. **Article Contract v1 已冻结**：固定 `meta.json` / `source.md` / `content.html` / `assets.json`，退休 `content_file` / `assets_file` 动态文件名，Docs == Validator == Publisher。
+C. **已修复**：候选发现改为 push range 内任意 commit（含 merge commit，`diff-tree -m`）触过的目录，ready → draft → ready 且 endpoint diff 为空时仍检出。
+D. **已建立**：只读 CI（`.github/workflows/ci.yml`）；`.env.example` 已修正 token 归属（PUBLISHER_ENDPOINT workflow-only；PUBLISHER_WEBHOOK_TOKEN 服务端 + workflow 共享）。
+
+Six-Finding Correction（Codex review follow-up）：
+
+E. **P1 已修复**：authorization target identity 只取 transitioned directory basename，`meta.json.article_id` 不决定「发布谁」；Validator 交叉校验目录名 == meta.article_id，不一致 FAIL CLOSED。回归 K。
+F. **P1 已修复**：merge commit 也参与候选发现（`git diff-tree -m`），conflict-resolution merge 中才变成 ready 的目录不再被漏掉。回归 J。
+G. **P1 已修复**：移除 push-level `paths:` filter —— endpoint diff 为空的 ready→draft→ready 再授权也能启动 workflow；普通 push 由内部 detector 判定 0 个 authorization 后正常结束，不产生 Publisher 调用。
+H. **P2 已修复**：exact-ref reader 校验 Git tree entry 的 mode/type，只接受 regular blob（100644/100755），拒绝 tree / symlink / submodule。回归 M。
+I. **P2 已修复**：CI 在 empty-tree fallback 下改用两点 diff（`EMPTY_TREE HEAD`）；三点形式会因 empty tree 不是 commit 而以 128 退出。
+J. **P2 已修复**：candidate discovery 不再按 article_id 折叠目录，重复 article_id 目录可被检出；唯一映射只在唯一性校验之后建立。回归 L。
+K. **已修复**：`vitest.config.ts` 显式排除 `dist/**`，避免编译副本与源码测试重复执行导致用例数翻倍。
+
+这些不代表真实微信 E2E 已通过或 production ready。
+
 ## Known P1 Gaps
 
-A. **KNOWN GAP**：Validator validates HEAD，Publisher may publish authorized commit。
-B. **KNOWN GAP**：Docs/Validator filename references vs Publisher fixed content.html/assets.json contract drift。
-Phase A 只记录，不修代码。
+（无未决 P1。）原有两条已知缺口已随本 Safety Gate 关闭：
+
+- ~~Validator validates HEAD，Publisher may publish authorized commit~~ → 见 Resolved 项 A。
+- ~~Docs/Validator filename references vs Publisher fixed content.html/assets.json contract drift~~ → 见 Resolved 项 B。
+
 
 ## MCP PR #3
 
@@ -85,4 +110,4 @@ git diff --check
 - 历史文档标 HISTORICAL ONLY，不能作为当前任务或部署指令。
 - repo hygiene 不 production publishing、不发真实草稿、不触发 workflow；不部署或改 secrets。
 - 不删 ledger；legacy physical cleanup 仅在明确批准并完成 dependency evidence 后执行，且不得改变 Current Publishing Logic；E2E 属于独立发布验证流程，不是 Repository Hygiene Gate；不改 PM2 name/path。
-- 本 Phase A 禁改 publishing / Validator / Publisher / WeChat 业务逻辑；不修 P1、不清理分支/worktree、不 merge/delete PR #3。
+- Publishing / Validator / Publisher / WeChat 等 Safety-Critical Logic 仅在有明确任务、明确 scope 与对应 regression evidence 时修改，不得顺手重构；branch/worktree cleanup 独立处理，不擅自 merge/delete MCP PR #3。

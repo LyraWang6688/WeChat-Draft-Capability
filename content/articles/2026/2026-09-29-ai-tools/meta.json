@@ -5,8 +5,5 @@
   "author": "Lyra Wang",
   "created_at": "2026-09-29",
   "updated_at": "2026-10-01",
-  "status": "draft",
-  "source_file": "source.md",
-  "content_file": "content.html",
-  "assets_file": "assets.json"
+  "status": "draft"
 }

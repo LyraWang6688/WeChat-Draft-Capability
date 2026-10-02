@@ -1,11 +1,16 @@
 name: Publish Ready Articles to WeChat Drafts
 
 on:
+  # 刻意不使用 push-level `paths:` filter。
+  # GitHub 的 paths filter 基于 before/after endpoint 变更文件判定，因此
+  # ready(A) → draft(B) → ready(C) 且 C 与 A 内容逐字节相同的 push，
+  # endpoint diff 为空 —— workflow 根本不会启动，range detector 再正确也没机会跑。
+  # 这里让所有 main push 都启动，由 deterministic internal detector 判定
+  # 存在 0 还是 N 个 authorization；普通 docs/code push 会在 count=0 时快速正常结束，
+  # 不会产生任何 Publisher 调用。
   push:
     branches:
       - main
-    paths:
-      - "content/articles/**"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -43,11 +48,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate content (Content Domain gate)
-        run: |
-          node scripts/validate-content.mjs
-
-      - name: Detect article directories that entered ready_to_upload
+      # Detection is the single production implementation in scripts/lib; the
+      # workflow only orchestrates. Candidates come from EVERY commit in the push
+      # range (not the BASE<->HEAD endpoint diff), so a ready -> draft -> ready
+      # reauthorization is found even when the endpoint content is unchanged.
+      - name: Detect article authorizations (transitions into ready_to_upload)
         id: detect
         run: |
           set -euo pipefail
@@ -60,154 +65,90 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             BASE_SHA="$(git rev-parse "${HEAD_SHA}^" 2>/dev/null || echo "$ZERO_SHA")"
           fi
-
-          # Changed files under content/articles/ since the previous state.
-          if [[ -z "$BASE_SHA" || "$BASE_SHA" == "$ZERO_SHA" ]]; then
-            echo "::notice::No previous commit to diff against; evaluating current HEAD state."
-            CHANGED_FILES="$(git ls-tree -r --name-only "$HEAD_SHA" -- content/articles/ || true)"
-          else
-            CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- content/articles/ || true)"
+          if [[ -z "$BASE_SHA" ]]; then
+            BASE_SHA="$ZERO_SHA"
           fi
 
-          # Candidate article directories of the form content/articles/{year}/{article_id}/.
-          DIRS="$(printf '%s\n' "$CHANGED_FILES" \
-            | sed -nE 's#^(content/articles/[0-9]{4}/[^/]+)/.*#\1#p' \
-            | sort -u)"
+          TRANSITIONS_FILE="$RUNNER_TEMP/transitions.json"
 
-          if [[ -z "$DIRS" ]]; then
-            echo "No changed article directories detected; nothing to publish."
-            echo "changed_dirs=[]" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # stdout is pure JSON; --out persists it for later steps. Human/notice
+          # output goes to stderr. The detector always exits 0 (empty list = none).
+          node scripts/detect-ready-transitions.mjs \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --out "$TRANSITIONS_FILE"
 
-          # Auto-publish ONLY on a status transition INTO ready_to_upload
-          # (e.g. draft -> ready_to_upload), and BIND the request to the exact
-          # commit that performed the transition: the human authorized a
-          # specific immutable content version, so source_commit must be that
-          # commit, not the overall push HEAD. An article that is already
-          # ready_to_upload must NOT be re-uploaded when only its content
-          # (source.md / content.html / assets) changes in a later commit.
-          TRANSITION_DIRS=""
-          while IFS= read -r dir; do
-            [[ -z "$dir" ]] && continue
+          COUNT="$(jq '.transitions | length' "$TRANSITIONS_FILE")"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "::notice::Detected ${COUNT} article authorization(s) in this range."
 
-            # Final (HEAD) status gates whether the article is authorized at all.
-            head_meta="$(git show "$HEAD_SHA:$dir/meta.json" 2>/dev/null || true)"
-            if [[ -n "$head_meta" ]]; then
-              head_status="$(printf '%s\n' "$head_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
-            else
-              head_status="<none>"
-            fi
-
-            if [[ "$head_status" != "ready_to_upload" ]]; then
-              echo "::notice::${dir}: final status is '${head_status}'; only ready_to_upload is authorized. Skipped."
-              continue
-            fi
-
-            # Commits in this push that touched the article directory, oldest first.
-            if [[ -z "$BASE_SHA" || "$BASE_SHA" == "$ZERO_SHA" ]]; then
-              COMMITS="$(git rev-list --reverse "$HEAD_SHA" -- "$dir" 2>/dev/null || true)"
-            else
-              COMMITS="$(git rev-list --reverse "$BASE_SHA..$HEAD_SHA" -- "$dir" 2>/dev/null || true)"
-            fi
-
-            # Walk the commits and keep the LAST transition into ready_to_upload;
-            # that commit is the authorized immutable content version.
-            AUTHORIZED=""
-            while IFS= read -r commit; do
-              [[ -z "$commit" ]] && continue
-
-              prev_meta="$(git show "${commit}^:${dir}/meta.json" 2>/dev/null || true)"
-              if [[ -n "$prev_meta" ]]; then
-                prev_status="$(printf '%s\n' "$prev_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
-              else
-                prev_status="<none>"
-              fi
-
-              cur_meta="$(git show "${commit}:${dir}/meta.json" 2>/dev/null || true)"
-              if [[ -n "$cur_meta" ]]; then
-                cur_status="$(printf '%s\n' "$cur_meta" | jq -r '.status // "<none>"' 2>/dev/null || echo "<none>")"
-              else
-                cur_status="<none>"
-              fi
-
-              if [[ "$cur_status" == "ready_to_upload" && "$prev_status" != "ready_to_upload" ]]; then
-                AUTHORIZED="$commit"
-              fi
-            done <<< "$COMMITS"
-
-            if [[ -z "$AUTHORIZED" ]]; then
-              echo "::notice::${dir}: no transition into ready_to_upload in this push (HEAD is ready but was already authorized before); skipped."
-              continue
-            fi
-
-            TRANSITION_DIRS="${TRANSITION_DIRS}${dir}"$'\t'"${AUTHORIZED}"$'\n'
-            echo "::notice::${dir}: authorization bound to commit ${AUTHORIZED}."
-          done <<< "$DIRS"
-
-          if [[ -z "$TRANSITION_DIRS" ]]; then
-            echo "No article entered ready_to_upload in this change; nothing to publish."
-            echo "changed_dirs=[]" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          printf '%s\n' "${TRANSITION_DIRS%$'\n'}" > "${RUNNER_TEMP}/changed_dirs.txt"
-
-          JSON="[]"
-          while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            dir="${line%%$'\t'*}"
-            JSON="$(printf '%s' "$JSON" | jq -c --arg d "$dir" '. + [$d]')"
-          done <<< "$TRANSITION_DIRS"
-          echo "changed_dirs=${JSON}" >> "$GITHUB_OUTPUT"
-
-          echo "Articles entering ready_to_upload:"
-          printf '%s' "${TRANSITION_DIRS%$'\n'}" | sed 's/^/  - /' | sed "s/\t/ @ /"
-
-      - name: Publish ready articles
-        if: steps.detect.outputs.changed_dirs != '[]'
+      # P1-1: the EXACT immutable commit that will be sent to the Publisher must
+      # first pass the same Content Contract Validator. Validated SHA == published
+      # SHA. Any failure aborts the job BEFORE any Publisher/WeChat side effect.
+      - name: Validate each authorized article package at its exact commit
+        if: steps.detect.outputs.count != '0'
         run: |
           set -euo pipefail
 
-          LIST_FILE="${RUNNER_TEMP}/changed_dirs.txt"
+          TRANSITIONS_FILE="$RUNNER_TEMP/transitions.json"
+          COUNT="$(jq '.transitions | length' "$TRANSITIONS_FILE")"
           FAILED=0
-          COUNT=0
 
-          while IFS=$'\t' read -r dir auth_commit; do
-            [[ -z "$dir" ]] && continue
-            COUNT=$((COUNT + 1))
+          for ((i = 0; i < COUNT; i += 1)); do
+            article_id="$(jq -r ".transitions[$i].article_id" "$TRANSITIONS_FILE")"
+            source_commit="$(jq -r ".transitions[$i].source_commit" "$TRANSITIONS_FILE")"
 
-            meta="${dir}/meta.json"
-            if [[ ! -f "$meta" ]]; then
-              echo "::warning::${dir}: meta.json not found; skipped."
-              continue
-            fi
-
-            status="$(jq -r '.status // ""' "$meta")"
-            if [[ "$status" != "ready_to_upload" ]]; then
-              echo "::notice::${dir}: status='${status}'; only ready_to_upload is published. Skipped."
-              continue
-            fi
-
-            if [[ -z "${auth_commit:-}" ]]; then
-              echo "::error::${dir}: no authorized source commit bound by the detect step; refusing to publish without a pinned content version."
+            # Defense in depth: only a canonical immutable SHA is validated/sent.
+            if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::${article_id}: source_commit '${source_commit}' is not a canonical 40-char lowercase hex SHA; refusing."
               FAILED=1
               continue
             fi
 
-            article_id="$(jq -r '.article_id // ""' "$meta")"
-            if [[ -z "$article_id" ]]; then
-              article_id="$(basename "$dir")"
+            echo "Validating ${article_id} @ ${source_commit} ..."
+            if node scripts/validate-content.mjs --ref "$source_commit" --article-id "$article_id"; then
+              echo "::notice::${article_id} @ ${source_commit} passed Content Contract validation."
+            else
+              echo "::error::${article_id} @ ${source_commit} FAILED Content Contract validation; it will NOT be sent to the Publisher."
+              FAILED=1
+            fi
+          done
+
+          if [[ "$FAILED" -gt 0 ]]; then
+            echo "::error::One or more authorized commits failed validation; aborting before any Publisher call."
+            exit 1
+          fi
+
+      - name: Publish ready articles
+        if: steps.detect.outputs.count != '0'
+        run: |
+          set -euo pipefail
+
+          TRANSITIONS_FILE="$RUNNER_TEMP/transitions.json"
+          COUNT="$(jq '.transitions | length' "$TRANSITIONS_FILE")"
+          FAILED=0
+
+          for ((i = 0; i < COUNT; i += 1)); do
+            dir="$(jq -r ".transitions[$i].dir" "$TRANSITIONS_FILE")"
+            article_id="$(jq -r ".transitions[$i].article_id" "$TRANSITIONS_FILE")"
+            source_commit="$(jq -r ".transitions[$i].source_commit" "$TRANSITIONS_FILE")"
+
+            # The human authorized this specific immutable content version; never
+            # degrade it to GITHUB_SHA / HEAD / main / a short SHA.
+            if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::${article_id}: source_commit '${source_commit}' is not a canonical 40-char lowercase hex SHA; refusing to publish."
+              FAILED=1
+              continue
             fi
 
             body="$(jq -nc \
               --arg repository "LyraWang6688/wechat-article-pilot" \
               --arg article_id "$article_id" \
               --arg ref "main" \
-              --arg source_commit "$auth_commit" \
+              --arg source_commit "$source_commit" \
               '{repository:$repository, article_id:$article_id, ref:$ref, source_commit:$source_commit}')"
 
-            echo "::notice::Ready article detected: ${dir} (article_id=${article_id}, authorized_commit=${auth_commit})"
+            echo "::notice::Publishing ${dir} (article_id=${article_id}, source_commit=${source_commit})"
             echo "Publisher request body: ${body}"
 
             if [[ "${{ inputs.dry_run }}" == "true" ]]; then
@@ -241,11 +182,7 @@ jobs:
               echo "::error::${article_id}: Publisher request failed (HTTP ${http_code:-no-response}, publisher_error_code=${error_code:-unknown})."
               FAILED=1
             fi
-          done < "$LIST_FILE"
-
-          if [[ "$COUNT" -eq 0 ]]; then
-            echo "No changed article directories were processed."
-          fi
+          done
 
           if [[ "$FAILED" -gt 0 ]]; then
             echo "::error::One or more Publisher requests failed; marking workflow as failed. Manual re-run: GitHub Actions -> Re-run jobs."

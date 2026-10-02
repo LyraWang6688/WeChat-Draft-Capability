@@ -24,6 +24,8 @@ content/
 
 示例：`content/articles/2026/2026-09-29-ai-tools/`
 
+Article Contract v1 **冻结文件名**：每个 Article Package 的 `meta.json`、`source.md`、`content.html`、`assets.json` 文件名固定，不支持通过 meta 字段动态配置或替换；`assets/` 目录存放封面等资产。Publisher 与 Validator 都按这些固定路径读取。
+
 ## 2. article_id
 
 - **全局唯一**，不得与其他文章重复。
@@ -42,10 +44,7 @@ content/
   "author": "Lyra Wang",
   "created_at": "2026-09-29",
   "updated_at": "2026-10-01",
-  "status": "draft",
-  "source_file": "source.md",
-  "content_file": "content.html",
-  "assets_file": "assets.json"
+  "status": "draft"
 }
 ```
 
@@ -58,9 +57,8 @@ content/
 | `created_at` | string | 是 | 创建日期 `YYYY-MM-DD` |
 | `updated_at` | string | 是 | 最近更新日期 `YYYY-MM-DD` |
 | `status` | string | 是 | 见下方 status 枚举 |
-| `source_file` | string | 是 | 源稿文件名，相对文章目录 |
-| `content_file` | string | 是 | 排版 HTML 文件名，相对文章目录 |
-| `assets_file` | string | 是 | 资产清单文件名，相对文章目录 |
+
+文章包内的 `source.md`、`content.html`、`assets.json` 为固定文件名，不再作为 meta 字段声明。
 
 可选字段（MVP 允许）：`digest`、`column`。
 
@@ -103,9 +101,9 @@ MVP 结构：
 
 ## 6. 引用规则与生命周期校验
 
-### 6.1 meta.json 文件引用
+### 6.1 固定文件名校验
 
-- `meta.json` 中的 `source_file` / `content_file` / `assets_file` 必须指向文章目录内实际存在的文件。
+- Article Package 必须包含固定命名的 `source.md`、`content.html`、`assets.json`（与 `meta.json` 同级），文件名不可通过 meta 字段替换。
 
 ### 6.2 assets 校验时机（生命周期校验）
 
