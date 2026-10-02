@@ -14,7 +14,7 @@ const WECHAT_ACCESS_TOKEN = "wechat_access_token_test";
 
 const ARTICLE_ID = "2026-09-29-ai-tools";
 const SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const REPOSITORY = "LyraWang6688/WeChat-Draft-Capability";
+const REPOSITORY = "LyraWang6688/wechat-draft-capability";
 const BASE = `content/articles/2026/${ARTICLE_ID}`;
 
 type FixtureOptions = {

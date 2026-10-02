@@ -15,5 +15,5 @@ export const appConfig = {
   publisherStateFile:
     process.env.PUBLISHER_STATE_FILE || path.resolve(process.cwd(), ".data", "publisher-state.json"),
   publisherAllowedRepositories:
-    process.env.PUBLISHER_ALLOWED_REPOSITORIES || "LyraWang6688/WeChat-Draft-Capability"
+    process.env.PUBLISHER_ALLOWED_REPOSITORIES || "LyraWang6688/wechat-draft-capability"
 };
