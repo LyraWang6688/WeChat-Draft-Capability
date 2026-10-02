@@ -2,7 +2,7 @@
 
 ## Repository Identity
 
-唯一 Current Agent Entry。Canonical Repository：`LyraWang6688/WeChat-Draft-Capability`。
+唯一 Current Agent Entry。Canonical Repository：`LyraWang6688/wechat-draft-capability`。
 产品/API 见 README.md；工程细节见 docs/AI_HANDOFF.md；内容操作见 content/AI_HANDOFF.md（先 index 再目标文章，不递归读取所有文章、不重新排版）。
 
 ## Current Architecture / Canonical Publishing Chain
@@ -29,7 +29,7 @@ processing 必须在第一次微信副作用前持久化；uploaded_to_wechat �
 
 ## Brand Ownership
 
-正式 Brand Owner：`LyraWang6688/WeChat-Draft-Capability`。
+正式 Brand Owner：`LyraWang6688/wechat-draft-capability`。
 `content/brand/one-page-wechat.md` 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 SSOT。品牌规则直接在上述品牌文件维护，无外部 upstream / 同步副本关系；不另建 Brand SSOT。
 
 ## Creative Layer vs Publishing Runtime

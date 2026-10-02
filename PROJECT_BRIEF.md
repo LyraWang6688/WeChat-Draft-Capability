@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Canonical Repository：`LyraWang6688/WeChat-Draft-Capability`。
+Canonical Repository：`LyraWang6688/wechat-draft-capability`。
 产品把文章内容与应用放在 Single Repo Content Workspace，让用户授权不可变内容版本送入微信草稿箱。正式发布由 Lyra 人工完成。
 唯一 Current Agent Entry 为 [AGENTS.md](AGENTS.md)；工程接手见 [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md)。
 
@@ -56,7 +56,7 @@ Publisher 不修改 content 内的 meta.json、不回写 Content status；Github
 
 ## Brand Ownership
 
-正式 Brand Owner：`LyraWang6688/WeChat-Draft-Capability`。
+正式 Brand Owner：`LyraWang6688/wechat-draft-capability`。
 [content/brand/one-page-wechat.md](content/brand/one-page-wechat.md) 是公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth。规则直接在本仓库维护，不设外部 upstream 或同步副本，不另建 Brand SSOT。
 
 AI / Human 创作层是 flexible、Human-driven、non-linear；标题、润色、事实核查、GEO、排版、封面与 Publish Check 可按需要组合。Human Authorization Gate 后进入 deterministic、Contract-driven、fail-closed 的 Publishing Runtime；创作能力不插入 GitHub Action → Publisher 主链。本阶段不实现 Skill Orchestration。
@@ -81,7 +81,7 @@ Feishu 已不是 Current Publishing Control Plane；runtime exposure retired。
 
 ## Experimental Capabilities
 
-[MCP PR #3](https://github.com/LyraWang6688/WeChat-Draft-Capability/pull/3)：Experimental / Deferred Product Channel，2026-10-02 为 OPEN、未合并、未删除，不属于当前 main 发布链；不得擅自合并或删除。
+[MCP PR #3](https://github.com/LyraWang6688/wechat-draft-capability/pull/3)：Experimental / Deferred Product Channel，2026-10-02 为 OPEN、未合并、未删除，不属于当前 main 发布链；不得擅自合并或删除。
 
 ## Validation
 

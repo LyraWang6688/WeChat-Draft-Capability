@@ -6,12 +6,12 @@
 - 核心变化：从「AI Coding 产品落地」升级为「非技术背景知识工作者的 AI 协作实践」。
 - 不变战略：持续生成对 AI 搜索友好的文章，即 GEO / AI-Friendly Writing 方向保持不变。
 - 不变资产：品牌颜色体系、文章结构、排版规则、真实克制的文风保持不变。
-- 主维护仓库：`WeChat-Draft-Capability`（`LyraWang6688/WeChat-Draft-Capability`）
+- 主维护仓库：`wechat-draft-capability`（`LyraWang6688/wechat-draft-capability`）
 - Skill 提炼仓库：`skill-library`
 
 ## Brand Ownership
 
-正式 Brand Owner：`LyraWang6688/WeChat-Draft-Capability`。
+正式 Brand Owner：`LyraWang6688/wechat-draft-capability`。
 本文件 `content/brand/one-page-wechat.md` 是「要AI不释手」微信公众号品牌定位、核心标签、栏目体系、品牌颜色、内容规范、写作风格及 GEO / AI-Friendly Writing 原则的唯一正式 Single Source of Truth。
 品牌规则直接在本仓库、本文件维护；不建立外部品牌 upstream 或同步副本关系，不另建 Brand SSOT。Skill 提炼不转移品牌所有权。
 

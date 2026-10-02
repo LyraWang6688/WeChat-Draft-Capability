@@ -22,7 +22,7 @@ import path from "node:path";
 const ROOT = process.cwd();
 const WORKSPACE = "/tmp/e2e-test";               // 测试文章包（完整 content/ 布局）
 const ARTICLE_ID = "2026-09-29-ai-tools";
-const REPO = "LyraWang6688/WeChat-Draft-Capability";
+const REPO = "LyraWang6688/wechat-draft-capability";
 const SOURCE_COMMIT = "a".repeat(40);            // 合法 40 位 hex
 const TOKEN = "test-publisher-token-1234567890";
 
