@@ -124,4 +124,65 @@ describe("detect-ready-transitions (Human authorization detection)", () => {
     expect(result.transitions).toHaveLength(1);
     expect(result.transitions[0]?.source_commit).toBe(b);
   });
+
+  it("J. article becomes ready only inside a conflict-resolution merge commit", () => {
+    harness = new GitRepoHarness();
+    // base：文章为 draft
+    harness.writeArticle({ id: ID, status: "draft" });
+    harness.writeFile("README.md", "base\n");
+    const base = harness.commit("base: draft + readme");
+
+    // feature 分支：只改 README，不碰文章
+    harness.createBranch("feature");
+    harness.writeFile("README.md", "feature-side\n");
+    harness.commit("feature: touch readme");
+
+    // 回到 main：只改 README（制造 README 冲突）
+    harness.checkout("main");
+    harness.writeFile("README.md", "main-side\n");
+    harness.commit("main: touch readme");
+
+    // merge 产生冲突；在解决冲突时把文章改为 ready
+    // —— 这次状态变化只存在于 merge commit 的结果中
+    harness.mergeNoFf("feature", "merge feature");
+    expect(harness.mergeConflicted).toBe(true);
+
+    harness.writeArticle({ id: ID, status: "ready_to_upload", withCover: true });
+    harness.writeFile("README.md", "resolved\n");
+    const mergeSha = harness.commitMerge("merge feature (resolved; article made ready)");
+
+    // 前置条件：该 merge commit 相对每个 parent 的普通 diff-tree 不带 --name-only？
+    // 关键断言：旧实现（无 -m）对 merge commit 不输出路径，因此完全漏掉该目录。
+    const withoutM = harness.git([
+      "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", mergeSha
+    ]).trim();
+    expect(withoutM).toBe(""); // 复现旧 bug 的前提
+
+    const result = harness.detect(base, mergeSha);
+    expect(result.transitions).toHaveLength(1);
+    expect(result.transitions[0]?.article_id).toBe(ID);
+    expect(result.transitions[0]?.source_commit).toBe(mergeSha);
+  });
+
+  it("K. directory / meta.article_id mismatch must not redirect authorization", () => {
+    harness = new GitRepoHarness();
+    // 目录名是 ID，但 meta.article_id 写成了另一篇文章的 ID
+    harness.writeArticleWithMetaId({ id: ID_A, status: "draft", metaArticleId: ID_B });
+    harness.writeArticle({ id: ID_B, status: "draft" });
+    const base = harness.commit("base: mismatched meta + article-b draft");
+
+    harness.writeArticleWithMetaId({ id: ID_A, status: "ready_to_upload", withCover: true, metaArticleId: ID_B });
+    const head = harness.commit("ready A (meta claims B)");
+
+    const result = harness.detect(base, head);
+    // authorization target identity 只能来自目录名，绝不 redirect 到 meta 声明的 ID_B
+    const ids = result.transitions.map((t) => t.article_id);
+    expect(ids).not.toContain(ID_B);
+    expect(ids).toEqual([ID_A]);
+
+    // 且 exact-ref Validator 必须 FAIL CLOSED（目录名与 meta 不一致）
+    const validation = harness.validateRef(head, ID_A);
+    expect(validation.ok).toBe(false);
+    expect(validation.errors.some((e) => e.includes("目录名"))).toBe(true);
+  });
 });

@@ -1,11 +1,16 @@
 name: Publish Ready Articles to WeChat Drafts
 
 on:
+  # 刻意不使用 push-level `paths:` filter。
+  # GitHub 的 paths filter 基于 before/after endpoint 变更文件判定，因此
+  # ready(A) → draft(B) → ready(C) 且 C 与 A 内容逐字节相同的 push，
+  # endpoint diff 为空 —— workflow 根本不会启动，range detector 再正确也没机会跑。
+  # 这里让所有 main push 都启动，由 deterministic internal detector 判定
+  # 存在 0 还是 N 个 authorization；普通 docs/code push 会在 count=0 时快速正常结束，
+  # 不会产生任何 Publisher 调用。
   push:
     branches:
       - main
-    paths:
-      - "content/articles/**"
   workflow_dispatch:
     inputs:
       dry_run:

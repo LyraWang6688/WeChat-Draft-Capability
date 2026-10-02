@@ -57,6 +57,10 @@ jobs:
           ZERO_SHA="0000000000000000000000000000000000000000"
           # Well-known empty tree object, computed at runtime to avoid hardcoding.
           EMPTY_TREE="$(git hash-object -t tree /dev/null)"
+          # 默认三点 diff（base...head）需要 base 与 head 之间有 merge-base。
+          # empty tree 是 tree 对象、不是 commit，三点形式会以
+          # "object ... is a tree, not a commit" 退出 128，因此必须降级为两点 diff。
+          DIFF_MODE="three-dot"
 
           case "${GITHUB_EVENT_NAME}" in
             pull_request)
@@ -70,7 +74,9 @@ jobs:
               RANGE_HEAD="${{ github.event.after }}"
               if [[ -z "${RANGE_BASE}" || "${RANGE_BASE}" == "${ZERO_SHA}" ]]; then
                 # Branch creation / no usable parent: check every file as added.
+                # empty tree 不是 commit，改用两点 diff。
                 RANGE_BASE="${EMPTY_TREE}"
+                DIFF_MODE="two-dot"
               fi
               ;;
             *)
@@ -79,5 +85,10 @@ jobs:
               ;;
           esac
 
-          echo "Checking committed whitespace diff: ${RANGE_BASE}...${RANGE_HEAD}"
-          git diff --check "${RANGE_BASE}...${RANGE_HEAD}"
+          if [[ "${DIFF_MODE}" == "two-dot" ]]; then
+            echo "Checking committed whitespace diff (two-dot, empty-tree base): ${RANGE_BASE} ${RANGE_HEAD}"
+            git diff --check "${RANGE_BASE}" "${RANGE_HEAD}"
+          else
+            echo "Checking committed whitespace diff (three-dot): ${RANGE_BASE}...${RANGE_HEAD}"
+            git diff --check "${RANGE_BASE}...${RANGE_HEAD}"
+          fi

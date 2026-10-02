@@ -19,6 +19,24 @@ import path from "node:path";
  * @property {(relPrefix: string) => string[]} listFiles  返回 prefix 下全部仓库相对文件路径（POSIX 分隔符）
  */
 
+/** Git tree entry 中被 Article Contract 接受的 regular file mode。 */
+const REGULAR_FILE_MODES = new Set(["100644", "100755"]);
+
+/**
+ * `git ls-tree` 的一行输出形如：
+ *   100644 blob <sha>\t<path>
+ * 解析出 mode 与 object type；非 regular file 返回 null。
+ *
+ * 为什么不能只用 `git cat-file -e`：它只能证明对象存在，对 tree / symlink /
+ * submodule 同样返回成功。Article Contract v1 要求 meta.json / source.md /
+ * content.html / assets.json 必须是普通文件，因此必须检查 mode 与 type。
+ */
+function parseTreeEntry(line) {
+  const match = /^(\d{6})\s+(\S+)\s+([0-9a-f]+)\t([\s\S]+)$/.exec(line);
+  if (!match) return null;
+  return { mode: match[1], type: match[2], sha: match[3], path: match[4] };
+}
+
 /** @returns {Reader} 针对当前工作区 */
 export function createWorkspaceReader(root) {
   function abs(rel) {
@@ -90,6 +108,26 @@ export function createGitRefReader(ref, { cwd = process.cwd() } = {}) {
     return out;
   }
 
+  /**
+   * 判断 ref 下某路径是否为 **regular file**。
+   *
+   * 不使用 `cat-file -e`：它只验证对象存在，tree / symlink / submodule 都会通过。
+   * 这里直接读 tree entry 的 mode 与 type：
+   *   - 只有 mode 100644（普通文件）/ 100755（可执行文件）且 type === "blob" 才算通过；
+   *   - 目录（040000 tree）、符号链接（120000 blob）、submodule（160000 commit）一律拒绝。
+   */
+  function isRegularFile(rel) {
+    const out = git(["ls-tree", ref, "--", rel], true);
+    if (out === null) return false;
+    for (const line of out.split("\n").filter(Boolean)) {
+      const entry = parseTreeEntry(line);
+      if (!entry) continue;
+      if (entry.path !== rel) continue;
+      return entry.type === "blob" && REGULAR_FILE_MODES.has(entry.mode);
+    }
+    return false;
+  }
+
   return {
     mode: "ref",
     ref,
@@ -97,9 +135,7 @@ export function createGitRefReader(ref, { cwd = process.cwd() } = {}) {
       // 路径不存在时 git show 以非零退出，归一为 null；非法 ref 同样表现为 meta 缺失并由上层报错。
       return git(["show", `${ref}:${rel}`], true);
     },
-    isFile(rel) {
-      return git(["cat-file", "-e", `${ref}:${rel}`], true) !== null;
-    },
+    isFile: isRegularFile,
     listFiles(relPrefix) {
       return listTree(relPrefix || "");
     }

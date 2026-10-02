@@ -53,15 +53,16 @@ function readStatus(cwd, ref, dir) {
   }
 }
 
-function readArticleId(cwd, ref, dir) {
-  const out = git(cwd, ["show", `${ref}:${dir}/meta.json`], true);
-  if (out === null) return null;
-  try {
-    const id = JSON.parse(out).article_id;
-    return typeof id === "string" && id ? id : null;
-  } catch {
-    return null;
-  }
+/**
+ * authorization target identity 只能来自 transitioned directory 本身。
+ *
+ * 绝不从 meta.json.article_id 推断「发布谁」：若某目录的 meta.json 误写了另一篇文章的
+ * article_id，一旦信任 meta，validation 与 Publisher 都会被 redirect 到那篇别的文章，
+ * 可能产生错误或重复草稿。目录名才是授权身份。
+ */
+function articleIdFromDir(dir) {
+  const parts = dir.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : dir;
 }
 
 /**
@@ -81,8 +82,11 @@ export function detectTransitions({ cwd = process.cwd(), base, head }) {
   const candidateDirs = new Set();
   for (const commit of commits) {
     // --root：range 含 root 提交时也列出其新增文件；对普通提交无副作用。
+    // -m：对 merge commit 逐 parent 输出 diff。没有 -m 时 diff-tree 对 merge commit
+    //     不输出任何路径（git 默认行为），会漏掉「只在 merge 结果里变成 ready」的目录。
+    //     逐 parent 的重复路径由 Set 自然去重。
     const paths = splitLines(
-      git(cwd, ["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", commit], true) ?? ""
+      git(cwd, ["diff-tree", "-m", "--no-commit-id", "--name-only", "-r", "--root", commit], true) ?? ""
     );
     for (const filePath of paths) {
       if (DIR_PATTERN.test(filePath)) {
@@ -124,7 +128,9 @@ export function detectTransitions({ cwd = process.cwd(), base, head }) {
 
     transitions.push({
       dir,
-      article_id: readArticleId(cwd, authorized, dir) || dir.split("/").pop(),
+      // 只信任目录名：meta.json.article_id 不得决定「发布谁」。
+      // 与 meta 不一致时由 exact-ref Validator 交叉校验并 FAIL CLOSED。
+      article_id: articleIdFromDir(dir),
       source_commit: authorized
     });
   }

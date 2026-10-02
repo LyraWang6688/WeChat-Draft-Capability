@@ -122,4 +122,51 @@ describe("validate-content ref mode (exact authorized commit)", () => {
     expect(result.ok).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
+
+  it("L. duplicate article_id directories are detected, not silently deduped", () => {
+    harness = new GitRepoHarness();
+    // 同名 article_id 出现在两个年份目录下。旧实现按 article_id 折叠 discovery 结果，
+    // 使重复目录在唯一性校验前消失，整个工作区被判为 PASS。
+    harness.writeArticleAtYear({ year: "2026", id: ID, status: "draft", withCover: true });
+    harness.writeArticleAtYear({ year: "2025", id: ID, status: "draft", withCover: true });
+    // index 只登记 canonical 的那条，确保不是靠 index 自身查重而通过。
+    harness.writeFile(
+      "content/index.json",
+      `${JSON.stringify(
+        {
+          schema_version: 1,
+          articles: [
+            {
+              article_id: ID,
+              title: "测试文章标题",
+              status: "draft",
+              path: `content/articles/2026/${ID}/`,
+              updated_at: "2026-09-29"
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const result = harness.validateWorkspace();
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("重复 article_id 目录"))).toBe(true);
+  });
+
+  it("M. a required Contract path that is a tree (not a regular file) fails validation", () => {
+    harness = new GitRepoHarness();
+    harness.addArticleCommit({ id: ID, status: "ready_to_upload", withCover: true }, "ready with tree source.md");
+
+    // 把 source.md 换成目录（git tree）。旧实现用 `cat-file -e` 只验证对象存在，
+    // tree 同样返回成功，因此这种 package 会被判为 PASS。
+    harness.removeFile(`content/articles/2026/${ID}/source.md`);
+    harness.writeFile(`content/articles/2026/${ID}/source.md/nested.txt`, "not a regular file\n");
+    const ref = harness.commit("source.md is now a tree");
+
+    const result = harness.validateRef(ref, ID);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("source.md"))).toBe(true);
+  });
 });

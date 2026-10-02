@@ -105,15 +105,36 @@ function articleDirRel(articleId) {
   return `${ARTICLES_PREFIX}${articleId.slice(0, 4)}/${articleId}`;
 }
 
+/**
+ * 收集仓库中出现的全部 article directory。
+ *
+ * 刻意 **不按 article_id 折叠 / 去重**：若两个目录同名 article_id
+ * （例如 content/articles/2025/2026-01-01-a/ 与 content/articles/2026/2026-01-01-a/），
+ * 提前用 Map 折叠会让后面的重复目录在唯一性校验前消失，重复目录永远无法被发现。
+ * Discovery 阶段保留每一个目录，唯一性由 validateWorkspace 显式判定。
+ */
 function collectArticleDirs(articleFiles) {
-  const map = new Map();
+  const seen = new Set();
+  const dirs = [];
   for (const file of articleFiles) {
     const match = file.match(/^content\/articles\/(\d{4})\/([^/]+)\//);
     if (!match) continue;
     const id = match[2];
-    if (!map.has(id)) map.set(id, { id, dir: `${match[1]}/${id}` });
+    const dir = `${match[1]}/${id}`;
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    dirs.push({ id, dir });
   }
-  return [...map.values()];
+  return dirs;
+}
+
+/** 校验成功后，才允许构建 article_id -> 唯一目录 的映射。 */
+function toUniqueDirMap(dirs) {
+  const map = new Map();
+  for (const entry of dirs) {
+    if (!map.has(entry.id)) map.set(entry.id, entry.dir);
+  }
+  return map;
 }
 
 /* ---- index 记录校验 ---- */
@@ -168,6 +189,16 @@ function validateArticleFiles(c, reader, articleId, dirRel, record) {
   c.check(isValidDateStr(meta.created_at), `[${articleId}] meta.created_at(${meta.created_at}) 必须是有效 YYYY-MM-DD`);
   c.check(isValidDateStr(meta.updated_at), `[${articleId}] meta.updated_at(${meta.updated_at}) 必须是有效 YYYY-MM-DD`);
   c.check(meta.article_id === articleId, `[${articleId}] meta.article_id(${meta.article_id}) 与定位不一致`);
+
+  // Directory identity 是 authorization target identity：目录名必须与 meta.article_id 一致。
+  // 若某目录的 meta.json 写了另一篇文章的 article_id，授权检测会按目录名绑定身份，
+  // 这里必须 FAIL CLOSED，绝不 redirect 到 meta 声明的那篇文章。
+  const dirArticleId = String(dirRel).split("/").filter(Boolean).pop();
+  c.check(
+    meta.article_id === dirArticleId,
+    `[${articleId}] meta.article_id(${meta.article_id}) 与目录名(${dirArticleId}) 不一致：授权身份取自目录名，必须一致`
+  );
+
   c.check(isValidArticleId(meta.article_id), `[${articleId}] meta.article_id 必须符合 YYYY-MM-DD-<slug> 且日期有效`);
   c.check(STATUS_ENUM.includes(meta.status), `[${articleId}] meta.status 非法: ${meta.status}`);
   if (record) {

@@ -71,13 +71,13 @@ AI / Human 创作层是 flexible、Human-driven、non-linear；标题、润色�
 4. **已修正**：`.env.example` 明确 `PUBLISHER_ENDPOINT` 为 workflow-only、`PUBLISHER_WEBHOOK_TOKEN` 为服务端与 workflow 共享凭证。
 5. **已建立**：只读 CI（`.github/workflows/ci.yml`），与发布工作流隔离。
 
-以上仅表示结构契约与自动化校验已统一，不代表已完成真实微信 E2E、不代表 production ready；首次真实 E2E 仍待执行。本轮未改 Publisher Ledger 语义、未物理删除 Legacy Feishu、未合并 / 删除 MCP PR #3、未做 deployment。
+以上仅表示结构契约与自动化校验已统一，不代表已完成真实微信 E2E、不代表 production ready；首次真实 E2E 仍待执行。Safety Gate 未改 Publisher Ledger 业务语义、未合并 / 删除 MCP PR #3、未做 deployment；Legacy Feishu physical implementation 由独立的 repository hygiene cleanup（PR #11）退役，与本 Safety Gate 无关。
 
 ## Legacy Status
 
 Feishu 已不是 Current Publishing Control Plane；runtime exposure retired。
-物理实现仍在 public、lark services、旧 routes/templates 等，分类 LEGACY_IMPLEMENTATION。删除延后至 first real E2E approval。
-旧 Feishu 文档以 HISTORICAL ONLY 标识保留，不是当前任务或部署指令。
+`public/**`、lark services、旧 routes/templates 的 physical implementation 已在经明确批准、dependency-evidence 驱动的 repository hygiene cleanup 中退役，不是 CURRENT_ARCHITECTURE。
+历史资料归档于 [docs/archive/legacy-feishu/](docs/archive/legacy-feishu/README.md)（HISTORICAL ONLY），不是当前任务或部署指令。
 
 ## Experimental Capabilities
 

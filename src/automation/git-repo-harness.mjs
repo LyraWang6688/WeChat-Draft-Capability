@@ -41,6 +41,11 @@ export class GitRepoHarness {
     return path.join(this.dir, "content", "articles", id.slice(0, 4), id);
   }
 
+  /** article directory 的仓库相对路径（POSIX）。 */
+  articleRelDir(id) {
+    return `content/articles/${id.slice(0, 4)}/${id}`;
+  }
+
   writeArticle(input) {
     const dir = this.articleDir(input.id);
     mkdirSync(path.join(dir, "assets"), { recursive: true });
@@ -68,6 +73,99 @@ export class GitRepoHarness {
     if (input.withCover) {
       writeFileSync(path.join(dir, "assets", "cover.jpg"), "fake-jpeg-cover-bytes", "utf8");
     }
+  }
+
+  /**
+   * 写出一个 article package，但把 meta.article_id 覆写成另一个 ID。
+   * 用于回归 K：目录名与 meta.article_id 不一致时必须 FAIL CLOSED。
+   */
+  writeArticleWithMetaId(input) {
+    this.writeArticle(input);
+    const metaPath = path.join(this.articleDir(input.id), "meta.json");
+    const meta = JSON.parse(readFileSync(metaPath, "utf8"));
+    meta.article_id = input.metaArticleId;
+    writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+  }
+
+  /**
+   * 在指定年份目录下写出一个同名 article_id 的目录。
+   * 用于回归 L：重复 article_id 目录必须被检出，不能被静默折叠。
+   */
+  writeArticleAtYear(input) {
+    const dir = path.join(this.dir, "content", "articles", input.year, input.id);
+    mkdirSync(path.join(dir, "assets"), { recursive: true });
+    const meta = {
+      schema_version: 1,
+      article_id: input.metaArticleId ?? input.id,
+      title: input.title ?? "测试文章标题",
+      author: "Lyra Wang",
+      created_at: "2026-09-29",
+      updated_at: "2026-09-29",
+      status: input.status ?? "draft"
+    };
+    writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+    writeFileSync(path.join(dir, "source.md"), "# 源稿\n\n正文\n", "utf8");
+    writeFileSync(path.join(dir, "content.html"), "<p>正文内容</p>\n", "utf8");
+    writeFileSync(
+      path.join(dir, "assets.json"),
+      `${JSON.stringify({ schema_version: 1, cover: { path: "assets/cover.jpg", required: true }, body_images: [] }, null, 2)}\n`,
+      "utf8"
+    );
+    if (input.withCover) {
+      writeFileSync(path.join(dir, "assets", "cover.jpg"), "fake-jpeg-cover-bytes", "utf8");
+    }
+  }
+
+  /** 创建分支并提交（用于构造 merge commit）。 */
+  createBranch(name) {
+    this.git(["checkout", "-q", "-b", name]);
+  }
+
+  checkout(ref) {
+    this.git(["checkout", "-q", ref]);
+  }
+
+  currentBranch() {
+    return this.git(["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  }
+
+  /**
+   * 构造一个真正的 merge commit（--no-ff）。
+   * 若产生冲突，则写入 README.md 解决冲突后提交，形成「conflict-resolution merge」。
+   */
+  mergeNoFf(branch, message) {
+    try {
+      this.git(["merge", "--no-ff", "--no-edit", "-q", branch]);
+    } catch {
+      // 冲突：交由调用方先写好解决结果，再由 commitMerge 完成提交。
+      this.mergeConflicted = true;
+      return null;
+    }
+    return this.sha();
+  }
+
+  /** 冲突 merge 解决后提交。 */
+  commitMerge(message) {
+    this.git(["add", "-A"]);
+    this.git(["commit", "-q", "--no-edit", "-m", message]);
+    return this.sha();
+  }
+
+  /** 通过 git update-index 把一个路径登记为 symlink（mode 120000）。 */
+  addSymlink(relPath, target) {
+    const abs = path.join(this.dir, relPath);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, target, "utf8");
+    this.git(["add", "-A"]);
+    this.git(["update-index", "--cacheinfo", "120000", this.hashBlob(target), relPath]);
+  }
+
+  hashBlob(content) {
+    return execFileSync("git", ["hash-object", "-w", "--stdin"], {
+      cwd: this.dir,
+      encoding: "utf8",
+      input: content
+    }).trim();
   }
 
   /** Overwrite a single file inside the repo (repo-relative POSIX path). */
