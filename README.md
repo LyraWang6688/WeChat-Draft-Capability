@@ -130,8 +130,6 @@ Publishing Runtime 由 Contract 驱动并 fail-closed；创作能力不进入 Gi
 
 Workflow Secrets：`PUBLISHER_ENDPOINT`（服务 base URL）与 `PUBLISHER_WEBHOOK_TOKEN`。微信和 GitHub 内容凭证不交给 workflow。
 
-Legacy-only：`LARK_CLI_BIN`、`LARK_CLI_TIMEOUT_MS`、`DEFAULT_BASE_TOKEN`、`DEFAULT_TABLE_ID`、`LOG_CLI_STDOUT`、`LOG_CLI_STDOUT_MAX_CHARS`、`LOG_CLI_STDERR_MAX_CHARS`；不是当前 Publisher 必需配置。参见 [.env.example](.env.example)。
-
 ## 9. Validation / Tests
 
 ```bash
@@ -147,8 +145,8 @@ PM2 配置仍为 `wechat-article-pilot-dev`、`/opt/wechat-article-pilot-dev`；
 
 ## 10. Legacy Feishu Status
 
-Feishu 已不是 Current Publishing Control Plane。Legacy Feishu Runtime Exposure 已关闭（runtime decommissioned）；残留 `public/**`、lark services、旧 routes/templates 等分类为 **LEGACY_IMPLEMENTATION**，不是 CURRENT_ARCHITECTURE。服务装配仍构造部分 legacy 对象，不代表路由仍可访问。
-Physical cleanup deferred until first real E2E approval；本阶段不物理删除。旧资料保留原文并加 HISTORICAL ONLY 标识，不作为当前运行或部署指南。
+Feishu 已不是 Current Publishing Control Plane。Legacy Feishu Runtime Exposure 已关闭（runtime decommissioned）；`public/**`、lark services、旧 routes/templates 的 physical implementation 已在经明确批准、dependency-evidence 驱动的 repository hygiene cleanup 中退役，不是 CURRENT_ARCHITECTURE。
+历史资料归档于 [docs/archive/legacy-feishu/](docs/archive/legacy-feishu/README.md)（HISTORICAL ONLY），保留原文，不作为当前运行或部署指南。
 
 ## 11. Experimental MCP Channel
 
