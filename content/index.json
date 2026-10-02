@@ -3,10 +3,10 @@
   "articles": [
     {
       "article_id": "2026-09-29-ai-tools",
-      "title": "《我用 AI 两年多后，终于不再关心“哪个 AI 工具最好用”了》",
-      "status": "draft",
+      "title": "我用 AI 两年多后，终于不再关心“哪个 AI 工具最好用”了",
+      "status": "ready_to_upload",
       "path": "content/articles/2026/2026-09-29-ai-tools/",
-      "updated_at": "2026-10-01"
+      "updated_at": "2026-10-02"
     }
   ]
 }
