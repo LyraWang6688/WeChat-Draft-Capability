@@ -3,7 +3,7 @@ import path from "node:path";
 import { appConfig } from "../config.js";
 import { HttpError } from "../errors/HttpError.js";
 import { logger } from "../utils/logger.js";
-import type { WechatCredentials } from "./integrationConfig.service.js";
+import type { WechatCredentials } from "../types/wechat.js";
 
 export type WechatDraftArticleInput = {
   title: string;

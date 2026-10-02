@@ -1,7 +1,7 @@
 > **HISTORICAL ONLY — Legacy Feishu**
 > 本文保留旧 Feishu 架构时期的原始记录，不代表当前架构、待办或部署指令。
-> Feishu Runtime Exposure 已关闭；物理实现分类 LEGACY_IMPLEMENTATION，清理延后至 E2E 并获批准。
-> 当前唯一 Agent 入口为 [AGENTS.md](../AGENTS.md)，工程事实见 [Current Engineering Handoff](AI_HANDOFF.md)。
+> Feishu Runtime Exposure 已关闭；对应 physical implementation 已在 approved repository hygiene cleanup 中退役。本文仅保留历史背景，不作为当前架构、任务或部署指令。
+> 当前唯一 Agent 入口为 [AGENTS.md](../../../AGENTS.md)，工程事实见 [Current Engineering Handoff](../../AI_HANDOFF.md)。
 
 # 推送草稿表模板结构
 

@@ -24,7 +24,7 @@ content/articles/** → scripts/validate-content.mjs → GitHub main
 ```
 
 `src/app.ts` 只挂载 /api/health 与 /api/publisher；当前接口为 GET /api/health 与 POST /api/publisher/drafts。不 serve public；Feishu/system/template/integration 路由未挂载，其余请求 404。
-services/index.ts 仍装配部分 legacy 对象，不代表其旧 HTTP 接口可访问。
+services/index.ts 仅装配 Publisher 依赖图（GithubContentService、WechatService、FilePublisherStateStore、PublisherDraftService），不再装配 legacy 对象。
 
 ## 4. Current Publishing Contract
 
@@ -81,9 +81,8 @@ B. Docs / Validator 支持 content_file/assets_file 引用，Publisher 固定 co
 
 ## 10. Legacy Feishu Status
 
-Runtime decommissioned / exposure retired；旧 public、lark services、routes、templates 分类 **LEGACY_IMPLEMENTATION**，不是 CURRENT_ARCHITECTURE。
-Physical cleanup deferred until first real E2E approval。
-LARK_CLI_INIT_CONTEXT、TEMPLATE_SCHEMA、WORKFLOW_FEASIBILITY、CLI_INTEGRATION_LESSONS、REMOTE_SERVER_DEV 保留为历史资料，不执行其中旧联调或部署指令。
+Runtime decommissioned / exposure retired；旧 public、lark services、routes、templates 的 physical implementation 已在 repository physical cleanup 中移除，不是 CURRENT_ARCHITECTURE。
+历史资料归档于 [docs/archive/legacy-feishu/](archive/legacy-feishu/README.md)（HISTORICAL ONLY），不执行其中旧联调或部署指令。
 
 ## 11. Experimental MCP PR #3
 
@@ -94,7 +93,7 @@ LARK_CLI_INIT_CONTEXT、TEMPLATE_SCHEMA、WORKFLOW_FEASIBILITY、CLI_INTEGRATION
 - repo hygiene 不发真实微信草稿，不触发默认会调用 API 的 workflow，不正式发布。
 - 不删除或改写 ledger，不改 secrets，不部署或重启，不改 PM2 name/path。
 - 不修本阶段 P1，不改 workflow / Validator / Publisher / WechatService 业务逻辑。
-- 不物理删除 legacy/public/lark 实现，不做分支/worktree 清理，不合并或删除 MCP PR #3。
+- 不做分支/worktree 清理，不合并或删除 MCP PR #3；legacy physical cleanup 须经明确批准与 dependency evidence，且不得改变 Current Publishing Logic。
 - 不把 content.html/assets.json 当垃圾，不重新排版内容。
 - 工作区非 clean 时先停下报告，不能覆盖用户修改；从最新 origin/main 确认事实。
 

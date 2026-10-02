@@ -54,8 +54,8 @@ Publisher Ledger、content.html、assets.json、Human Authorization workflow、B
 
 ## Legacy Feishu
 
-Feishu 非 Current Publishing Control Plane；Runtime = retired，Physical code = pending cleanup after first real E2E approval。
-public / lark services / legacy routes/templates 属于 LEGACY_IMPLEMENTATION；仍装配对象不表示旧路由暴露。
+Feishu 非 Current Publishing Control Plane；Runtime = retired，physical implementation（public / lark services / legacy routes/templates）已在经明确批准、dependency-evidence 驱动的 repository hygiene cleanup 中退役。
+历史资料归档于 docs/archive/legacy-feishu/（HISTORICAL ONLY），仅保留历史背景，不作为当前架构、任务或部署指令。
 
 ## Known P1 Gaps
 
@@ -84,5 +84,5 @@ git diff --check
 - Current Truth from code；以最新 origin/main 核对，dirty 工作区先报告，不覆盖修改。
 - 历史文档标 HISTORICAL ONLY，不能作为当前任务或部署指令。
 - repo hygiene 不 production publishing、不发真实草稿、不触发 workflow；不部署或改 secrets。
-- 不删 ledger，不在 E2E 与明确批准之前物理删除 legacy；不改 PM2 name/path。
+- 不删 ledger；legacy physical cleanup 仅在明确批准并完成 dependency evidence 后执行，且不得改变 Current Publishing Logic；E2E 属于独立发布验证流程，不是 Repository Hygiene Gate；不改 PM2 name/path。
 - 本 Phase A 禁改 publishing / Validator / Publisher / WeChat 业务逻辑；不修 P1、不清理分支/worktree、不 merge/delete PR #3。
